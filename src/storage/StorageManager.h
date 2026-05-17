@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "reader/BookContent.h"
+#include "storage/IndexedBookStore.h"
 
 class StorageManager {
  public:
@@ -38,6 +39,9 @@ class StorageManager {
   bool loadFirstBookWords(std::vector<String> &words, String *loadedPath = nullptr);
   bool loadBookContent(size_t index, BookContent &book, String *loadedPath = nullptr,
                        size_t *loadedIndex = nullptr);
+  bool loadIndexedBook(size_t index, IndexedBookStore &store, BookMetadata &metadata,
+                       String *loadedPath = nullptr, size_t *loadedIndex = nullptr,
+                       bool allowIndexBuild = true, bool allowEpubConversion = true);
   size_t bookCount() const;
   String bookPath(size_t index) const;
   bool bookIsArticle(size_t index) const;
@@ -49,6 +53,11 @@ class StorageManager {
   bool repairSdCardFolders();
 
  private:
+  bool ensureIndexedBook(const String &path, BookMetadata &metadata, bool rsvpFormat,
+                         bool allowIndexBuild);
+  bool buildIndexedBook(const String &path, BookMetadata &metadata, bool rsvpFormat);
+  bool readIndexedMetadata(const String &path, BookMetadata &metadata,
+                           IndexedBookStore::Header *header = nullptr);
   bool parseFile(File &file, BookContent &book, bool rsvpFormat);
   bool ensureEpubConverted(const String &epubPath, String &rsvpPath);
   void refreshBookPaths(bool includeMetadata = true);

@@ -53,6 +53,9 @@ constexpr size_t kContextPreviewAnchorLeadWords = 112;
 constexpr size_t kContextPreviewMaxParagraphSnapWords = 48;
 constexpr uint32_t kProgressSaveIntervalMs = 15000;
 constexpr uint32_t kUsbTransferExitHoldMs = 1200;
+constexpr size_t kTimeEstimateBlockWords = 256;
+constexpr size_t kTimeEstimateBlocksPerUpdate = 1;
+constexpr uint32_t kTimeEstimateProgressLogMs = 5000;
 constexpr uint32_t kNominalBatteryRuntimeMinutes = 330;
 constexpr uint8_t kBatteryDisplayHysteresisPercent = 2;
 constexpr uint8_t kBatteryRuntimeMinDropPercent = 3;
@@ -205,9 +208,11 @@ constexpr uint16_t kPacingDelayMinMs = 0;
 constexpr uint16_t kPacingDelayMaxMs = 600;
 constexpr uint16_t kPacingDelayStepMs = 50;
 constexpr uint16_t kDefaultPacingDelayMs = 200;
-constexpr uint16_t kSettingsWpmMin = 100;
+constexpr uint16_t kSettingsWpmMin = 10;
+constexpr uint16_t kSettingsWpmLowMax = 100;
+constexpr uint16_t kSettingsWpmLowStep = 10;
 constexpr uint16_t kSettingsWpmMax = 1000;
-constexpr uint16_t kSettingsWpmStep = 25;
+constexpr uint16_t kSettingsWpmHighStep = 25;
 constexpr int8_t kTypographyTrackingMin = -2;
 constexpr int8_t kTypographyTrackingMax = 3;
 constexpr uint8_t kTypographyAnchorMin = 30;
@@ -279,6 +284,23 @@ int nextCyclicSetting(int value, int minValue, int maxValue, int step = 1) {
     next = minValue;
   }
   return next;
+}
+
+uint16_t nextReaderWpmSetting(uint16_t value) {
+  int normalized = clampIntSetting(value, kSettingsWpmMin, kSettingsWpmMax);
+  if (normalized < static_cast<int>(kSettingsWpmLowMax)) {
+    normalized += kSettingsWpmLowStep;
+    if (normalized > static_cast<int>(kSettingsWpmLowMax)) {
+      normalized = kSettingsWpmLowMax;
+    }
+    return static_cast<uint16_t>(normalized);
+  }
+
+  int next = normalized + kSettingsWpmHighStep;
+  if (next > static_cast<int>(kSettingsWpmMax)) {
+    next = kSettingsWpmMin;
+  }
+  return static_cast<uint16_t>(next);
 }
 
 DisplayManager::TypographyConfig defaultTypographyConfig() {
@@ -616,6 +638,7 @@ void App::update(uint32_t nowMs) {
   handleTouch(nowMs);
   updateWpmFeedback(nowMs);
   maybeSaveReadingPosition(nowMs);
+  updateTimeEstimateBuild(nowMs);
 
   if (batteryChanged && (state_ == AppState::Paused || state_ == AppState::Playing)) {
     renderActiveReader(nowMs);
@@ -765,12 +788,19 @@ void App::updateReader(uint32_t nowMs) {
     return;
   }
 
+  if (!ensureCurrentBookWordAvailable(nowMs)) {
+    return;
+  }
+
   if (shouldFinalizeReaderPause(nowMs)) {
     finalizeReaderPause(nowMs);
     return;
   }
 
   const bool changed = reader_.update(nowMs, !pauseAtSentenceEndRequested_);
+  if (!ensureCurrentBookWordAvailable(nowMs)) {
+    return;
+  }
   if (scrollModeEnabled()) {
     if (changed || nowMs - lastScrollAnimationRenderMs_ >= kScrollAnimationFrameMs) {
       renderScrollReader(nowMs);
@@ -1711,6 +1741,9 @@ void App::applyBrowseHoldScroll(uint16_t y, uint32_t elapsedMs, uint32_t nowMs) 
   }
 
   reader_.seekRelative(pausedTouch_.startWordIndex, targetWords);
+  if (!ensureCurrentBookWordAvailable(nowMs)) {
+    return;
+  }
   pausedTouch_.gestureStepsApplied = targetWords;
   contextViewVisible_ = true;
   wpmFeedbackVisible_ = false;
@@ -2253,6 +2286,7 @@ void App::selectSettingsItem(uint32_t nowMs) {
     return;
   }
 
+  bool pacingConfigChanged = false;
   switch (settingsSelectedIndex_) {
     case kSettingsBackIndex:
       flushPendingTimeEstimateRebuild();
@@ -2273,11 +2307,8 @@ void App::selectSettingsItem(uint32_t nowMs) {
       renderSettings();
       return;
     case kSettingsPacingWpmIndex:
-      reader_.setWpm(static_cast<uint16_t>(
-          nextCyclicSetting(reader_.wpm(), kSettingsWpmMin, kSettingsWpmMax, kSettingsWpmStep)));
+      reader_.setWpm(nextReaderWpmSetting(reader_.wpm()));
       preferences_.putUShort(kPrefWpm, reader_.wpm());
-      invalidateTimeEstimateCache();
-      pacingCacheDirty_ = true;
       Serial.printf("[settings] WPM=%u interval=%lu ms\n", reader_.wpm(),
                     static_cast<unsigned long>(reader_.wordIntervalMs()));
       break;
@@ -2285,16 +2316,19 @@ void App::selectSettingsItem(uint32_t nowMs) {
       pacingLongWordDelayMs_ = static_cast<uint16_t>(nextCyclicSetting(
           pacingLongWordDelayMs_, kPacingDelayMinMs, kPacingDelayMaxMs, kPacingDelayStepMs));
       preferences_.putUShort(kPrefPacingLongMs, pacingLongWordDelayMs_);
+      pacingConfigChanged = true;
       break;
     case kSettingsPacingComplexityIndex:
       pacingComplexWordDelayMs_ = static_cast<uint16_t>(nextCyclicSetting(
           pacingComplexWordDelayMs_, kPacingDelayMinMs, kPacingDelayMaxMs, kPacingDelayStepMs));
       preferences_.putUShort(kPrefPacingComplexMs, pacingComplexWordDelayMs_);
+      pacingConfigChanged = true;
       break;
     case kSettingsPacingPunctuationIndex:
       pacingPunctuationDelayMs_ = static_cast<uint16_t>(nextCyclicSetting(
           pacingPunctuationDelayMs_, kPacingDelayMinMs, kPacingDelayMaxMs, kPacingDelayStepMs));
       preferences_.putUShort(kPrefPacingPunctuationMs, pacingPunctuationDelayMs_);
+      pacingConfigChanged = true;
       break;
     case kSettingsPacingResetIndex:
       pacingLongWordDelayMs_ = kDefaultPacingDelayMs;
@@ -2303,12 +2337,15 @@ void App::selectSettingsItem(uint32_t nowMs) {
       preferences_.putUShort(kPrefPacingLongMs, pacingLongWordDelayMs_);
       preferences_.putUShort(kPrefPacingComplexMs, pacingComplexWordDelayMs_);
       preferences_.putUShort(kPrefPacingPunctuationMs, pacingPunctuationDelayMs_);
+      pacingConfigChanged = true;
       break;
     default:
       return;
   }
 
-  applyPacingSettings();
+  if (pacingConfigChanged) {
+    applyPacingSettings();
+  }
   rebuildSettingsMenuItems();
   renderSettings();
 }
@@ -3356,6 +3393,9 @@ void App::selectBookPickerItem(uint32_t nowMs) {
   saveReadingPosition(true);
   if (!loadBookAtIndex(bookIndex, nowMs)) {
     Serial.println("[book-picker] Failed to load selected book");
+    display_.renderStatus("Book open failed", storage_.bookDisplayName(bookIndex),
+                          "Check serial log");
+    delay(1800);
     renderBookPicker();
     return;
   }
@@ -3603,14 +3643,23 @@ void App::enterUsbTransfer(uint32_t nowMs) {
   pausedTouch_.active = false;
   pausedTouchIntent_ = TouchIntent::None;
   wpmFeedbackVisible_ = false;
+  const size_t resumeIndex = reader_.currentIndex();
   setState(AppState::UsbTransfer, nowMs);
 
+  activeBookStore_.close();
   storage_.end();
   if (!usbTransfer_.begin(true)) {
     Serial.printf("[app] USB transfer failed: %s\n", usbTransfer_.statusMessage());
     display_.renderStatus("USB", "SD not ready", "Returning");
-    const bool storageReady = storage_.begin();
-    (void)storageReady;
+    storageReady_ = storage_.begin();
+    if (storageReady_ && usingStorageBook_ && !currentBookPath_.isEmpty()) {
+      const int refreshedBookIndex = findBookIndexByPath(currentBookPath_);
+      if (refreshedBookIndex >= 0 &&
+          loadBookAtIndex(static_cast<size_t>(refreshedBookIndex), nowMs, false, false, false,
+                          false)) {
+        reader_.seekTo(resumeIndex);
+      }
+    }
     setState(AppState::Paused, nowMs);
     return;
   }
@@ -3648,11 +3697,22 @@ void App::exitUsbTransfer(uint32_t nowMs) {
   display_.renderStatus("USB", "Remounting SD", "");
   usbTransfer_.end();
 
-  const bool storageReady = storage_.begin();
-  if (storageReady) {
+  storageReady_ = storage_.begin();
+  if (storageReady_) {
     const int refreshedBookIndex = findBookIndexByPath(currentBookPath_);
     if (refreshedBookIndex >= 0) {
-      currentBookIndex_ = static_cast<size_t>(refreshedBookIndex);
+      const size_t resumeIndex = reader_.currentIndex();
+      if (loadBookAtIndex(static_cast<size_t>(refreshedBookIndex), nowMs, false, false, false,
+                          false)) {
+        reader_.seekTo(resumeIndex);
+      } else {
+        Serial.println("[app] current indexed book unavailable after USB transfer");
+        usingStorageBook_ = false;
+        currentBookPath_ = "";
+        currentBookTitle_ = "Demo";
+        reader_.clearLoadedBook(nowMs);
+        reader_.begin(nowMs);
+      }
     } else if (storage_.bookCount() > 0) {
       loadBookAtIndex(0, nowMs);
     }
@@ -3684,6 +3744,7 @@ void App::enterPowerOff(uint32_t nowMs) {
   delay(300);
   display_.prepareForSleep();
 
+  activeBookStore_.close();
   storage_.end();
   touch_.end();
   touchInitialized_ = false;
@@ -3710,6 +3771,7 @@ void App::enterSleep(uint32_t nowMs) {
   delay(200);
 
   display_.prepareForSleep();
+  activeBookStore_.close();
   storage_.end();
   touch_.end();
   touchInitialized_ = false;
@@ -3740,12 +3802,29 @@ void App::wakeFromSleep() {
   state_ = AppState::Paused;
 
   const bool displayReady = display_.wakeFromSleep();
+  touchInitialized_ = touch_.begin();
+  storageReady_ = storage_.begin();
+
+  if (storageReady_ && usingStorageBook_ && !currentBookPath_.isEmpty()) {
+    const size_t resumeIndex = reader_.currentIndex();
+    const int refreshedBookIndex = findBookIndexByPath(currentBookPath_);
+    if (refreshedBookIndex >= 0 &&
+        loadBookAtIndex(static_cast<size_t>(refreshedBookIndex), nowMs, false, false, false,
+                        false)) {
+      reader_.seekTo(resumeIndex);
+    } else {
+      Serial.println("[app] current indexed book unavailable after wake");
+      usingStorageBook_ = false;
+      currentBookPath_ = "";
+      currentBookTitle_ = "Demo";
+      reader_.clearLoadedBook(nowMs);
+      reader_.begin(nowMs);
+    }
+  }
+
   if (displayReady) {
     renderActiveReader(nowMs);
   }
-
-  touchInitialized_ = touch_.begin();
-  storage_.begin();
 }
 
 bool App::restoreSavedBook(uint32_t nowMs) {
@@ -3760,7 +3839,7 @@ bool App::restoreSavedBook(uint32_t nowMs) {
     return false;
   }
 
-  if (!loadBookAtIndex(static_cast<size_t>(bookIndex), nowMs, true)) {
+  if (!loadBookAtIndex(static_cast<size_t>(bookIndex), nowMs, true, false, false, false)) {
     return false;
   }
 
@@ -3804,8 +3883,8 @@ void App::loadPendingBootBook(uint32_t nowMs) {
   pendingBootBookLoad_ = false;
   display_.renderStatus("Loading book", currentBookTitle_, "Please wait");
   const uint32_t startedMs = millis();
-  const bool loaded =
-      loadBookAtIndex(pendingBootBookIndex_, nowMs, pendingBootBookLegacyFallback_);
+  const bool loaded = loadBookAtIndex(pendingBootBookIndex_, nowMs,
+                                      pendingBootBookLegacyFallback_, false, false, false);
   const uint32_t elapsedMs = millis() - startedMs;
   Serial.printf("[app] deferred book load %s in %lu ms\n", loaded ? "ok" : "failed",
                 static_cast<unsigned long>(elapsedMs));
@@ -3849,22 +3928,40 @@ void App::saveReadingPosition(bool force) {
                 currentBookPath_.c_str());
 }
 
-bool App::loadBookAtIndex(size_t index, uint32_t nowMs, bool allowLegacyPositionFallback) {
-  BookContent book;
+bool App::loadBookAtIndex(size_t index, uint32_t nowMs, bool allowLegacyPositionFallback,
+                          bool allowIndexBuild, bool allowEpubConversion,
+                          bool rebuildTimeEstimate) {
+  BookMetadata book;
   String loadedPath;
   size_t loadedIndex = index;
-  if (!storage_.loadBookContent(index, book, &loadedPath, &loadedIndex)) {
+  const String initialLabel = storage_.bookDisplayName(index);
+  renderStorageStatus("Opening book", initialLabel.c_str(),
+                      allowIndexBuild ? "Checking index" : "Checking saved index", 5);
+  if (!storage_.loadIndexedBook(index, activeBookStore_, book, &loadedPath, &loadedIndex,
+                                allowIndexBuild, allowEpubConversion)) {
+    return false;
+  }
+
+  const String loadedTitle = book.title.isEmpty() ? displayNameForPath(loadedPath) : book.title;
+  renderStorageStatus("Opening book", loadedTitle.c_str(), "Loading word cache", 70);
+
+  const bool keepingExistingTimeCache =
+      !rebuildTimeEstimate && timeEstimateCacheValid_ && currentBookPath_ == loadedPath;
+  reader_.setWordSource(&activeBookStore_, nowMs);
+  if (reader_.wordCount() == 0 || reader_.currentWord().isEmpty()) {
+    Serial.printf("[app] failed to read first indexed word from %s\n", loadedPath.c_str());
+    activeBookStore_.close();
+    reader_.clearLoadedBook(nowMs);
+    renderStorageStatus("Book open failed", loadedTitle.c_str(), "Word cache unreadable", 100);
     return false;
   }
 
   chapterMarkers_ = std::move(book.chapters);
   paragraphStarts_ = std::move(book.paragraphStarts);
-  reader_.setWords(std::move(book.words), nowMs);
   invalidateContextPreviewWindow();
-  rebuildTimeEstimateCache();
   currentBookIndex_ = loadedIndex;
   currentBookPath_ = loadedPath;
-  currentBookTitle_ = book.title.isEmpty() ? displayNameForPath(loadedPath) : book.title;
+  currentBookTitle_ = loadedTitle;
   lastSavedWordIndex_ = static_cast<size_t>(-1);
   usingStorageBook_ = true;
   preferences_.putString(kPrefBookPath, currentBookPath_);
@@ -3875,11 +3972,20 @@ bool App::loadBookAtIndex(size_t index, uint32_t nowMs, bool allowLegacyPosition
   const uint32_t savedWordIndex =
       savedWordIndexForBook(currentBookPath_, allowLegacyPositionFallback);
   if (savedWordIndex != kNoSavedWordIndex) {
+    renderStorageStatus("Opening book", currentBookTitle_.c_str(), "Restoring position", 78);
     reader_.seekTo(savedWordIndex);
     lastSavedWordIndex_ = reader_.currentIndex();
     Serial.printf("[app] restored book position word=%u key=%s\n",
                   static_cast<unsigned int>(reader_.currentIndex()),
                   bookPositionKey(currentBookPath_).c_str());
+  }
+
+  if (rebuildTimeEstimate) {
+    rebuildTimeEstimateCache();
+  } else if (!keepingExistingTimeCache) {
+    invalidateTimeEstimateCache();
+  } else {
+    renderStorageStatus("Opening book", currentBookTitle_.c_str(), "Using cached estimate", 92);
   }
 
   lastProgressSaveMs_ = nowMs;
@@ -4259,16 +4365,29 @@ String App::currentFooterMetricLabel() const {
 
   const size_t currentIndex = std::min(reader_.currentIndex(), wordCount - 1);
   size_t endIndex = wordCount;
+  const bool generatingEstimate = accurateTimeEstimateEnabled_ && timeEstimateBuildInProgress_ &&
+                                  timeEstimateBuildMatchesCurrentBook();
+  const int generatingPercent =
+      generatingEstimate
+          ? static_cast<int>((timeEstimateBuildNextBlock_ * 100UL) /
+                             std::max<size_t>(1, timeEstimateBuildBlockCount_))
+          : 0;
 
   if (footerMetricMode_ == FooterMetricMode::ChapterTime) {
     const size_t chapterIndex = currentChapterIndex();
     if (chapterIndex < chapterMarkers_.size() && chapterIndex + 1 < chapterMarkers_.size()) {
       endIndex = chapterMarkers_[chapterIndex + 1].wordIndex;
     }
+    if (generatingEstimate) {
+      return String("CH ") + String(generatingPercent) + "% gen";
+    }
     return String("CH ") +
            formatReadingTimeRemaining(estimatedReadingTimeRemainingMs(currentIndex, endIndex));
   }
 
+  if (generatingEstimate) {
+    return String("BOOK ") + String(generatingPercent) + "% gen";
+  }
   return String("BOOK ") +
          formatReadingTimeRemaining(estimatedReadingTimeRemainingMs(currentIndex, endIndex));
 }
@@ -4349,18 +4468,65 @@ uint32_t App::estimatedReadingTimeRemainingMs(size_t startIndex, size_t endIndex
     return baseMs;
   }
 
-  return baseMs + wordBonusPrefixSumMs_[endIndex] - wordBonusPrefixSumMs_[startIndex];
+  return baseMs + estimatedPacingBonusMs(startIndex, endIndex);
+}
+
+uint32_t App::estimatedPacingBonusMs(size_t startIndex, size_t endIndex) const {
+  if (!timeEstimateCacheValid_ || wordBonusBlockPrefixSumMs_.empty() ||
+      endIndex <= startIndex) {
+    return 0;
+  }
+
+  const size_t wordCount = reader_.wordCount();
+  startIndex = std::min(startIndex, wordCount);
+  endIndex = std::min(endIndex, wordCount);
+  if (endIndex <= startIndex) {
+    return 0;
+  }
+
+  const size_t firstFullBlock = (startIndex + kTimeEstimateBlockWords - 1) /
+                                kTimeEstimateBlockWords;
+  const size_t lastFullBlockEnd = endIndex / kTimeEstimateBlockWords;
+  uint32_t bonusMs = 0;
+
+  if (firstFullBlock < lastFullBlockEnd &&
+      lastFullBlockEnd < wordBonusBlockPrefixSumMs_.size()) {
+    const size_t startPartialEnd =
+        std::min(endIndex, firstFullBlock * kTimeEstimateBlockWords);
+    for (size_t i = startIndex; i < startPartialEnd; ++i) {
+      bonusMs += reader_.wordPacingBonusMsAt(i);
+    }
+
+    bonusMs += wordBonusBlockPrefixSumMs_[lastFullBlockEnd] -
+               wordBonusBlockPrefixSumMs_[firstFullBlock];
+
+    const size_t endPartialStart = lastFullBlockEnd * kTimeEstimateBlockWords;
+    for (size_t i = endPartialStart; i < endIndex; ++i) {
+      bonusMs += reader_.wordPacingBonusMsAt(i);
+    }
+    return bonusMs;
+  }
+
+  for (size_t i = startIndex; i < endIndex; ++i) {
+    bonusMs += reader_.wordPacingBonusMsAt(i);
+  }
+  return bonusMs;
 }
 
 void App::invalidateTimeEstimateCache() {
+  cancelTimeEstimateBuild();
   timeEstimateCacheValid_ = false;
-  std::vector<uint32_t>().swap(wordBonusPrefixSumMs_);
+  std::vector<uint32_t>().swap(wordBonusBlockPrefixSumMs_);
 }
 
 void App::rebuildTimeEstimateCache() {
   invalidateTimeEstimateCache();
   pacingCacheDirty_ = false;
   if (!accurateTimeEstimateEnabled_) {
+    if (!currentBookTitle_.isEmpty()) {
+      renderStorageStatus("Reading time", currentBookTitle_.c_str(), "Fast estimate enabled",
+                          100);
+    }
     return;
   }
 
@@ -4369,19 +4535,108 @@ void App::rebuildTimeEstimateCache() {
     return;
   }
 
-  wordBonusPrefixSumMs_.assign(n + 1, 0);
-  uint32_t running = 0;
-  const uint32_t startMs = millis();
-  for (size_t i = 0; i < n; ++i) {
-    wordBonusPrefixSumMs_[i] = running;
-    running += reader_.wordPacingBonusMsAt(i);
+  const String label = currentBookTitle_.isEmpty() ? String("Current book") : currentBookTitle_;
+  timeEstimateBuildWordCount_ = n;
+  timeEstimateBuildBlockCount_ =
+      (timeEstimateBuildWordCount_ + kTimeEstimateBlockWords - 1) / kTimeEstimateBlockWords;
+  if (timeEstimateBuildBlockCount_ == 0) {
+    return;
   }
-  wordBonusPrefixSumMs_[n] = running;
-  timeEstimateCacheValid_ = true;
 
-  Serial.printf("[time-est] cached %u words bonus=%lums took=%lums\n",
-                static_cast<unsigned int>(n), static_cast<unsigned long>(running),
-                static_cast<unsigned long>(millis() - startMs));
+  wordBonusBlockPrefixSumMs_.assign(timeEstimateBuildBlockCount_ + 1, 0);
+  timeEstimateBuildBookPath_ = currentBookPath_;
+  timeEstimateBuildNextBlock_ = 0;
+  timeEstimateBuildRunningMs_ = 0;
+  timeEstimateBuildStartedMs_ = millis();
+  timeEstimateBuildLastLogMs_ = timeEstimateBuildStartedMs_;
+  timeEstimateBuildInProgress_ = true;
+
+  const String detail = String(static_cast<unsigned int>(n)) + " words in background";
+  renderStorageStatus("Reading time", label.c_str(), detail.c_str(), 0);
+  Serial.printf("[time-est] background build started words=%u blocks=%u book=%s\n",
+                static_cast<unsigned int>(timeEstimateBuildWordCount_),
+                static_cast<unsigned int>(timeEstimateBuildBlockCount_),
+                currentBookPath_.c_str());
+}
+
+void App::cancelTimeEstimateBuild() {
+  timeEstimateBuildInProgress_ = false;
+  timeEstimateBuildBookPath_ = "";
+  timeEstimateBuildWordCount_ = 0;
+  timeEstimateBuildBlockCount_ = 0;
+  timeEstimateBuildNextBlock_ = 0;
+  timeEstimateBuildRunningMs_ = 0;
+  timeEstimateBuildStartedMs_ = 0;
+  timeEstimateBuildLastLogMs_ = 0;
+}
+
+bool App::timeEstimateBuildMatchesCurrentBook() const {
+  return timeEstimateBuildInProgress_ && timeEstimateBuildBookPath_ == currentBookPath_ &&
+         timeEstimateBuildWordCount_ == reader_.wordCount();
+}
+
+void App::updateTimeEstimateBuild(uint32_t nowMs) {
+  if (!timeEstimateBuildInProgress_) {
+    return;
+  }
+
+  if (!accurateTimeEstimateEnabled_ || !timeEstimateBuildMatchesCurrentBook()) {
+    Serial.println("[time-est] background build cancelled");
+    invalidateTimeEstimateCache();
+    return;
+  }
+
+  if (state_ == AppState::Playing || state_ == AppState::CompanionSync ||
+      state_ == AppState::UsbTransfer || state_ == AppState::Sleeping) {
+    return;
+  }
+
+  size_t processedBlocks = 0;
+  while (timeEstimateBuildNextBlock_ < timeEstimateBuildBlockCount_ &&
+         processedBlocks < kTimeEstimateBlocksPerUpdate) {
+    const size_t block = timeEstimateBuildNextBlock_;
+    wordBonusBlockPrefixSumMs_[block] = timeEstimateBuildRunningMs_;
+    const size_t blockStart = block * kTimeEstimateBlockWords;
+    const size_t blockEnd =
+        std::min(timeEstimateBuildWordCount_, blockStart + kTimeEstimateBlockWords);
+    for (size_t i = blockStart; i < blockEnd; ++i) {
+      timeEstimateBuildRunningMs_ += reader_.wordPacingBonusMsAt(i);
+    }
+    ++timeEstimateBuildNextBlock_;
+    ++processedBlocks;
+    delay(0);
+  }
+
+  if (timeEstimateBuildNextBlock_ >= timeEstimateBuildBlockCount_) {
+    wordBonusBlockPrefixSumMs_[timeEstimateBuildBlockCount_] = timeEstimateBuildRunningMs_;
+    timeEstimateCacheValid_ = true;
+    const uint32_t elapsedMs = millis() - timeEstimateBuildStartedMs_;
+    Serial.printf("[time-est] background cached %u words in %u blocks bonus=%lums took=%lums\n",
+                  static_cast<unsigned int>(timeEstimateBuildWordCount_),
+                  static_cast<unsigned int>(timeEstimateBuildBlockCount_),
+                  static_cast<unsigned long>(timeEstimateBuildRunningMs_),
+                  static_cast<unsigned long>(elapsedMs));
+    cancelTimeEstimateBuild();
+    if (state_ == AppState::Paused || state_ == AppState::Playing) {
+      renderActiveReader(nowMs);
+    } else if (state_ == AppState::Menu) {
+      renderMenu();
+    }
+    return;
+  }
+
+  if (nowMs - timeEstimateBuildLastLogMs_ >= kTimeEstimateProgressLogMs) {
+    const int progress =
+        static_cast<int>((timeEstimateBuildNextBlock_ * 100UL) /
+                         std::max<size_t>(1, timeEstimateBuildBlockCount_));
+    Serial.printf("[time-est] background progress %u/%u blocks (%d%%)\n",
+                  static_cast<unsigned int>(timeEstimateBuildNextBlock_),
+                  static_cast<unsigned int>(timeEstimateBuildBlockCount_), progress);
+    timeEstimateBuildLastLogMs_ = nowMs;
+    if (state_ == AppState::Paused) {
+      renderActiveReader(nowMs);
+    }
+  }
 }
 
 String App::timeEstimateModeLabel() const {
@@ -4595,6 +4850,10 @@ void App::renderActiveReader(uint32_t nowMs) {
     return;
   }
 
+  if (!ensureCurrentBookWordAvailable(nowMs)) {
+    return;
+  }
+
   applyReaderUiOrientation();
   if (scrollModeEnabled()) {
     if (wpmFeedbackVisible_) {
@@ -4612,6 +4871,45 @@ void App::renderActiveReader(uint32_t nowMs) {
   } else {
     renderReaderWord();
   }
+}
+
+bool App::ensureCurrentBookWordAvailable(uint32_t nowMs) {
+  if (!usingStorageBook_ || reader_.wordCount() == 0 || !reader_.currentWord().isEmpty()) {
+    return true;
+  }
+
+  handleCurrentBookReadFailure(nowMs, "Word cache unreadable");
+  return false;
+}
+
+void App::handleCurrentBookReadFailure(uint32_t nowMs, const char *detail) {
+  const String failedTitle = currentBookTitle_.isEmpty() ? String("Current book") : currentBookTitle_;
+  const String failedPath = currentBookPath_;
+  const bool articlesOnly =
+      currentBookIndex_ < storage_.bookCount() && storage_.bookIsArticle(currentBookIndex_);
+
+  Serial.printf("[app] active book read failed word=%u book=%s detail=%s\n",
+                static_cast<unsigned int>(reader_.currentIndex()), failedPath.c_str(),
+                detail == nullptr ? "" : detail);
+
+  saveReadingPosition(true);
+  activeBookStore_.close();
+  reader_.clearLoadedBook(nowMs);
+  chapterMarkers_.clear();
+  paragraphStarts_.clear();
+  currentBookPath_ = "";
+  currentBookTitle_ = "Demo";
+  usingStorageBook_ = false;
+  contextViewVisible_ = false;
+  wpmFeedbackVisible_ = false;
+  invalidateContextPreviewWindow();
+  invalidateTimeEstimateCache();
+
+  setState(AppState::Menu, nowMs);
+  display_.renderStatus("Book read failed", failedTitle,
+                        detail == nullptr ? "Reopen from library" : detail);
+  delay(1800);
+  openBookPicker(articlesOnly);
 }
 
 void App::renderReaderWord() {
@@ -4763,6 +5061,10 @@ void App::renderScrollReader(uint32_t nowMs, const String &overlayText) {
 }
 
 void App::renderWpmFeedback(uint32_t nowMs) {
+  if (!ensureCurrentBookWordAvailable(nowMs)) {
+    return;
+  }
+
   applyReaderUiOrientation();
   wpmFeedbackVisible_ = true;
   wpmFeedbackUntilMs_ = nowMs + kWpmFeedbackMs;

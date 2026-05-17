@@ -285,7 +285,9 @@ class App {
   bool prepareBootBookLoad();
   void loadPendingBootBook(uint32_t nowMs);
   void saveReadingPosition(bool force = false);
-  bool loadBookAtIndex(size_t index, uint32_t nowMs, bool allowLegacyPositionFallback = false);
+  bool loadBookAtIndex(size_t index, uint32_t nowMs, bool allowLegacyPositionFallback = false,
+                       bool allowIndexBuild = true, bool allowEpubConversion = true,
+                       bool rebuildTimeEstimate = true);
   String bookPositionKey(const String &bookPath) const;
   String bookWordCountKey(const String &bookPath) const;
   String bookRecentKey(const String &bookPath) const;
@@ -319,12 +321,18 @@ class App {
   String batteryTimeRemainingLabel() const;
   String formatBatteryTimeRemaining(uint32_t minutes) const;
   uint32_t estimatedReadingTimeRemainingMs(size_t startIndex, size_t endIndex) const;
+  uint32_t estimatedPacingBonusMs(size_t startIndex, size_t endIndex) const;
   void rebuildTimeEstimateCache();
   void invalidateTimeEstimateCache();
   void flushPendingTimeEstimateRebuild();
+  void cancelTimeEstimateBuild();
+  void updateTimeEstimateBuild(uint32_t nowMs);
+  bool timeEstimateBuildMatchesCurrentBook() const;
   String formatReadingTimeRemaining(uint32_t remainingMs) const;
   String timeEstimateModeLabel() const;
   uint8_t readingProgressPercent() const;
+  bool ensureCurrentBookWordAvailable(uint32_t nowMs);
+  void handleCurrentBookReadFailure(uint32_t nowMs, const char *detail);
   void renderReaderWord();
   void renderContextPreview();
   void renderWpmFeedback(uint32_t nowMs);
@@ -368,6 +376,7 @@ class App {
   ButtonHandler powerButton_;
   TouchHandler touch_;
   StorageManager storage_;
+  IndexedBookStore activeBookStore_;
   OtaUpdater otaUpdater_;
   RssFeedManager rssFeedManager_;
   CompanionSyncManager companionSync_;
@@ -417,8 +426,16 @@ class App {
   std::vector<String> chapterMenuItems_;
   std::vector<ChapterMarker> chapterMarkers_;
   std::vector<size_t> paragraphStarts_;
-  std::vector<uint32_t> wordBonusPrefixSumMs_;
+  std::vector<uint32_t> wordBonusBlockPrefixSumMs_;
+  String timeEstimateBuildBookPath_;
+  size_t timeEstimateBuildWordCount_ = 0;
+  size_t timeEstimateBuildBlockCount_ = 0;
+  size_t timeEstimateBuildNextBlock_ = 0;
+  uint32_t timeEstimateBuildRunningMs_ = 0;
+  uint32_t timeEstimateBuildStartedMs_ = 0;
+  uint32_t timeEstimateBuildLastLogMs_ = 0;
   bool timeEstimateCacheValid_ = false;
+  bool timeEstimateBuildInProgress_ = false;
   bool accurateTimeEstimateEnabled_ = true;
   bool pacingCacheDirty_ = false;
   std::vector<DisplayManager::ContextWord> contextPreviewWords_;

@@ -88,6 +88,8 @@ Use this layout:
 /books/articles/my-article.rsvp
 ```
 
+On first open, the firmware may create `.ridx` and `.rdat` sidecar files next to a book. These are the SD-backed word index and normalized word data used for long books. Leave them on the card; they are rebuilt automatically if the source book changes.
+
 ### Option 2: USB Transfer Mode
 
 From the device:

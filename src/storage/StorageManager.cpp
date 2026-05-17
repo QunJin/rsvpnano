@@ -214,6 +214,11 @@ bool isHiddenOrSidecarPath(const String &path) {
     return true;
   }
 
+  if (lowered.endsWith(".ridx") || lowered.endsWith(".rdat") ||
+      lowered.endsWith(".tmp")) {
+    return true;
+  }
+
   return lowered == "thumbs.db" || lowered == "desktop.ini";
 }
 
@@ -1536,6 +1541,296 @@ String readRsvpDirectiveValue(const String &path, const char *directive) {
   return "";
 }
 
+String indexedIndexPathFor(const String &path) { return path + ".ridx"; }
+
+String indexedDataPathFor(const String &path) { return path + ".rdat"; }
+
+String indexedTempPathFor(const String &path) { return path + ".tmp"; }
+
+bool writeExact(File &file, const void *data, size_t bytes) {
+  return file.write(reinterpret_cast<const uint8_t *>(data), bytes) == bytes;
+}
+
+bool readExact(File &file, void *data, size_t bytes) {
+  return file.read(reinterpret_cast<uint8_t *>(data), bytes) == bytes;
+}
+
+uint32_t fnv1aUpdate(uint32_t hash, const uint8_t *data, size_t bytes) {
+  for (size_t i = 0; i < bytes; ++i) {
+    hash ^= data[i];
+    hash *= 16777619UL;
+  }
+  return hash;
+}
+
+uint32_t sourceFingerprint(File &file, uint32_t sourceSize) {
+  uint32_t hash = 2166136261UL;
+  uint8_t sizeBytes[4] = {
+      static_cast<uint8_t>(sourceSize & 0xFF),
+      static_cast<uint8_t>((sourceSize >> 8) & 0xFF),
+      static_cast<uint8_t>((sourceSize >> 16) & 0xFF),
+      static_cast<uint8_t>((sourceSize >> 24) & 0xFF),
+  };
+  hash = fnv1aUpdate(hash, sizeBytes, sizeof(sizeBytes));
+
+  constexpr size_t kSampleBytes = 512;
+  uint8_t buffer[kSampleBytes];
+  const uint32_t offsets[] = {
+      0,
+      sourceSize > kSampleBytes ? sourceSize / 2 : 0,
+      sourceSize > kSampleBytes ? sourceSize - kSampleBytes : 0,
+  };
+
+  for (uint32_t offset : offsets) {
+    if (!file.seek(offset)) {
+      continue;
+    }
+    const size_t wanted =
+        static_cast<size_t>(std::min<uint32_t>(kSampleBytes, sourceSize - offset));
+    const size_t read = file.read(buffer, wanted);
+    hash = fnv1aUpdate(hash, buffer, read);
+  }
+
+  return hash;
+}
+
+uint32_t sourceFingerprint(const String &path, uint32_t sourceSize) {
+  File file = SD_MMC.open(path, FILE_READ);
+  if (!file || file.isDirectory()) {
+    if (file) {
+      file.close();
+    }
+    return 0;
+  }
+
+  const uint32_t fingerprint = sourceFingerprint(file, sourceSize);
+  file.close();
+  return fingerprint;
+}
+
+bool readIndexHeader(const String &path, IndexedBookStore::Header &header) {
+  File file = SD_MMC.open(indexedIndexPathFor(path), FILE_READ);
+  if (!file || file.isDirectory()) {
+    if (file) {
+      file.close();
+    }
+    return false;
+  }
+
+  const bool ok = readExact(file, &header, sizeof(header));
+  file.close();
+  return ok && header.magic == IndexedBookStore::kMagic &&
+         header.version == IndexedBookStore::kVersion &&
+         header.headerSize == sizeof(IndexedBookStore::Header) &&
+         header.recordSize == sizeof(IndexedBookStore::WordRecord) &&
+         header.recordsOffset >= sizeof(IndexedBookStore::Header);
+}
+
+struct IndexedBuildContext {
+  File *indexFile = nullptr;
+  File *dataFile = nullptr;
+  BookMetadata *metadata = nullptr;
+  uint32_t wordCount = 0;
+  uint32_t dataSize = 0;
+  bool failed = false;
+  const char *failure = "";
+};
+
+void addIndexedChapterMarker(IndexedBuildContext &context, const String &title) {
+  if (title.isEmpty() || context.metadata == nullptr) {
+    return;
+  }
+
+  ChapterMarker marker;
+  marker.title = title;
+  marker.wordIndex = context.wordCount;
+
+  if (!context.metadata->chapters.empty() &&
+      context.metadata->chapters.back().wordIndex == marker.wordIndex) {
+    context.metadata->chapters.back() = marker;
+    return;
+  }
+
+  context.metadata->chapters.push_back(marker);
+}
+
+void addIndexedParagraphMarker(IndexedBuildContext &context) {
+  if (context.metadata == nullptr) {
+    return;
+  }
+
+  const size_t wordIndex = context.wordCount;
+  if (!context.metadata->paragraphStarts.empty() &&
+      context.metadata->paragraphStarts.back() == wordIndex) {
+    return;
+  }
+
+  context.metadata->paragraphStarts.push_back(wordIndex);
+}
+
+bool pushIndexedWord(String token, IndexedBuildContext &context, ParseStats *stats) {
+  trimAsciiWhitespace(token);
+
+  if (token.length() >= 3 && static_cast<uint8_t>(token[0]) == 0xEF &&
+      static_cast<uint8_t>(token[1]) == 0xBB && static_cast<uint8_t>(token[2]) == 0xBF) {
+    token.remove(0, 3);
+  }
+
+  trimAsciiWhitespace(token);
+
+  bool hasAlphaNumeric = false;
+  for (size_t i = 0; i < token.length(); ++i) {
+    if (LatinText::isWordCharacter(LatinText::byteValue(token[i]))) {
+      hasAlphaNumeric = true;
+      break;
+    }
+  }
+
+  if (token.isEmpty() || !hasAlphaNumeric) {
+    return true;
+  }
+
+  if (token.length() > UINT16_MAX ||
+      context.dataSize > UINT32_MAX - static_cast<uint32_t>(token.length())) {
+    context.failed = true;
+    context.failure = "Index limit reached";
+    return false;
+  }
+
+  if ((context.wordCount % kParseMemoryCheckWordInterval) == 0 && context.wordCount > 0 &&
+      parseMemoryLow()) {
+    if (stats != nullptr) {
+      stats->memoryLow = true;
+    }
+    context.failed = true;
+    context.failure = "Memory limit reached";
+    return false;
+  }
+
+  IndexedBookStore::WordRecord record;
+  record.offset = context.dataSize;
+  record.length = static_cast<uint16_t>(token.length());
+  record.flags = 0;
+
+  if (!writeExact(*context.dataFile, token.c_str(), token.length()) ||
+      !writeExact(*context.indexFile, &record, sizeof(record))) {
+    context.failed = true;
+    context.failure = "SD write failed";
+    return false;
+  }
+
+  context.dataSize += static_cast<uint32_t>(token.length());
+  ++context.wordCount;
+  if (context.metadata != nullptr) {
+    context.metadata->wordCount = context.wordCount;
+  }
+  return true;
+}
+
+bool appendIndexedLineWords(const String &line, IndexedBuildContext &context, ParseStats *stats) {
+  const String normalizedLine = normalizeDisplayText(line, stats);
+  String currentWord;
+  currentWord.reserve(32);
+
+  for (size_t i = 0; i < normalizedLine.length(); ++i) {
+    const char c = normalizedLine[i];
+    if (isWordBoundary(c)) {
+      if (!currentWord.isEmpty()) {
+        if (!pushIndexedWord(currentWord, context, stats)) {
+          return false;
+        }
+        currentWord = "";
+        if (reachedBookWordLimit(context.wordCount)) {
+          return false;
+        }
+      }
+      continue;
+    }
+
+    currentWord += c;
+  }
+
+  if (!currentWord.isEmpty() && !reachedBookWordLimit(context.wordCount)) {
+    if (!pushIndexedWord(currentWord, context, stats)) {
+      return false;
+    }
+  }
+
+  return !reachedBookWordLimit(context.wordCount);
+}
+
+bool processIndexedBookLine(const String &line, IndexedBuildContext &context,
+                            bool &paragraphPending, ParseStats *stats) {
+  const String trimmed = stripBom(line);
+  if (trimmed.isEmpty()) {
+    paragraphPending = true;
+    return true;
+  }
+
+  String chapterTitle;
+  if (chapterTitleFromLine(line, chapterTitle)) {
+    addIndexedChapterMarker(context, chapterTitle);
+    paragraphPending = true;
+  }
+
+  if (paragraphPending) {
+    addIndexedParagraphMarker(context);
+    paragraphPending = false;
+  }
+  return appendIndexedLineWords(line, context, stats);
+}
+
+bool processIndexedRsvpLine(const String &line, IndexedBuildContext &context,
+                            bool &paragraphPending, ParseStats *stats) {
+  String trimmed = stripBom(line);
+  if (trimmed.isEmpty()) {
+    paragraphPending = true;
+    return true;
+  }
+
+  if (trimmed.startsWith("@@")) {
+    trimmed.remove(0, 1);
+    if (paragraphPending) {
+      addIndexedParagraphMarker(context);
+      paragraphPending = false;
+    }
+    return appendIndexedLineWords(trimmed, context, stats);
+  }
+
+  if (trimmed.startsWith("@")) {
+    String lowered = trimmed;
+    lowered.toLowerCase();
+    if (prefixHasBoundary(lowered, "@para")) {
+      paragraphPending = true;
+      return true;
+    }
+    if (prefixHasBoundary(lowered, "@chapter")) {
+      String title = directiveValue(trimmed, "@chapter");
+      if (title.isEmpty()) {
+        title = "Chapter";
+      }
+      addIndexedChapterMarker(context, title);
+      paragraphPending = true;
+      return true;
+    }
+    if (context.metadata != nullptr && prefixHasBoundary(lowered, "@title")) {
+      context.metadata->title = directiveValue(trimmed, "@title");
+      return true;
+    }
+    if (context.metadata != nullptr && prefixHasBoundary(lowered, "@author")) {
+      context.metadata->author = directiveValue(trimmed, "@author");
+      return true;
+    }
+    return true;
+  }
+
+  if (paragraphPending) {
+    addIndexedParagraphMarker(context);
+    paragraphPending = false;
+  }
+  return appendIndexedLineWords(line, context, stats);
+}
+
 }  // namespace
 
 void StorageManager::setStatusCallback(StatusCallback callback, void *context) {
@@ -1827,6 +2122,519 @@ bool StorageManager::loadBookContent(size_t index, BookContent &book, String *lo
 
   Serial.println("[storage] No readable book files found under /books");
   return false;
+}
+
+bool StorageManager::readIndexedMetadata(const String &path, BookMetadata &metadata,
+                                         IndexedBookStore::Header *headerOut) {
+  metadata.clear();
+
+  IndexedBookStore::Header header;
+  if (!readIndexHeader(path, header)) {
+    if (fileExistsAndHasBytes(indexedIndexPathFor(path))) {
+      Serial.printf("[storage-index] invalid index header: %s\n",
+                    indexedIndexPathFor(path).c_str());
+    }
+    return false;
+  }
+
+  File source = SD_MMC.open(path, FILE_READ);
+  if (!source || source.isDirectory()) {
+    if (source) {
+      source.close();
+    }
+    Serial.printf("[storage-index] source missing while validating index: %s\n", path.c_str());
+    return false;
+  }
+
+  const size_t sourceBytes = source.size();
+  const uint32_t actualFingerprint =
+      sourceBytes <= UINT32_MAX ? sourceFingerprint(source, static_cast<uint32_t>(sourceBytes))
+                                : 0;
+  source.close();
+  if (sourceBytes > UINT32_MAX || header.sourceSize != static_cast<uint32_t>(sourceBytes) ||
+      header.sourceFingerprint != actualFingerprint) {
+    Serial.printf("[storage-index] stale index: %s size=%lu/%lu fingerprint=%08lx/%08lx\n",
+                  path.c_str(), static_cast<unsigned long>(header.sourceSize),
+                  static_cast<unsigned long>(sourceBytes),
+                  static_cast<unsigned long>(header.sourceFingerprint),
+                  static_cast<unsigned long>(actualFingerprint));
+    return false;
+  }
+
+  File data = SD_MMC.open(indexedDataPathFor(path), FILE_READ);
+  if (!data || data.isDirectory() || data.size() < header.dataSize) {
+    const size_t dataBytes = data ? data.size() : 0;
+    if (data) {
+      data.close();
+    }
+    Serial.printf("[storage-index] data sidecar invalid: %s size=%lu expected=%lu\n",
+                  indexedDataPathFor(path).c_str(), static_cast<unsigned long>(dataBytes),
+                  static_cast<unsigned long>(header.dataSize));
+    return false;
+  }
+  data.close();
+
+  File indexFile = SD_MMC.open(indexedIndexPathFor(path), FILE_READ);
+  if (!indexFile || indexFile.isDirectory()) {
+    if (indexFile) {
+      indexFile.close();
+    }
+    Serial.printf("[storage-index] index sidecar cannot reopen: %s\n",
+                  indexedIndexPathFor(path).c_str());
+    return false;
+  }
+
+  metadata.wordCount = header.wordCount;
+  metadata.title = readRsvpDirectiveValue(path, "@title");
+  metadata.author = readRsvpDirectiveValue(path, "@author");
+  if (metadata.title.isEmpty()) {
+    metadata.title = normalizeDisplayText(displayNameWithoutExtension(path));
+  }
+
+  if (header.paragraphCount > 0) {
+    metadata.paragraphStarts.reserve(header.paragraphCount);
+    if (!indexFile.seek(header.paragraphsOffset)) {
+      indexFile.close();
+      metadata.clear();
+      Serial.printf("[storage-index] paragraph section seek failed: %s offset=%lu\n",
+                    indexedIndexPathFor(path).c_str(),
+                    static_cast<unsigned long>(header.paragraphsOffset));
+      return false;
+    }
+    for (uint32_t i = 0; i < header.paragraphCount; ++i) {
+      uint32_t wordIndex = 0;
+      if (!readExact(indexFile, &wordIndex, sizeof(wordIndex))) {
+        indexFile.close();
+        metadata.clear();
+        Serial.printf("[storage-index] paragraph section read failed: %s item=%lu\n",
+                      indexedIndexPathFor(path).c_str(), static_cast<unsigned long>(i));
+        return false;
+      }
+      metadata.paragraphStarts.push_back(wordIndex);
+    }
+  }
+
+  if (header.chapterCount > 0) {
+    metadata.chapters.reserve(header.chapterCount);
+    if (!indexFile.seek(header.chaptersOffset)) {
+      indexFile.close();
+      metadata.clear();
+      Serial.printf("[storage-index] chapter section seek failed: %s offset=%lu\n",
+                    indexedIndexPathFor(path).c_str(),
+                    static_cast<unsigned long>(header.chaptersOffset));
+      return false;
+    }
+    for (uint32_t i = 0; i < header.chapterCount; ++i) {
+      IndexedBookStore::ChapterRecord record;
+      if (!readExact(indexFile, &record, sizeof(record))) {
+        indexFile.close();
+        metadata.clear();
+        Serial.printf("[storage-index] chapter section read failed: %s item=%lu\n",
+                      indexedIndexPathFor(path).c_str(), static_cast<unsigned long>(i));
+        return false;
+      }
+      ChapterMarker marker;
+      marker.wordIndex = record.wordIndex;
+      const uint32_t titleLength =
+          std::min<uint32_t>(record.titleLength, sizeof(record.title));
+      String title;
+      title.reserve(titleLength);
+      for (uint32_t j = 0; j < titleLength; ++j) {
+        title += record.title[j];
+      }
+      marker.title = title;
+      metadata.chapters.push_back(marker);
+    }
+  }
+
+  indexFile.close();
+  if (metadata.wordCount > 0 && metadata.paragraphStarts.empty()) {
+    metadata.paragraphStarts.push_back(0);
+  }
+  if (headerOut != nullptr) {
+    *headerOut = header;
+  }
+  if (metadata.wordCount == 0) {
+    Serial.printf("[storage-index] index has no words: %s\n", indexedIndexPathFor(path).c_str());
+    return false;
+  }
+  return true;
+}
+
+bool StorageManager::buildIndexedBook(const String &path, BookMetadata &metadata,
+                                      bool rsvpFormat) {
+  metadata.clear();
+
+  File source = SD_MMC.open(path, FILE_READ);
+  if (!source || source.isDirectory()) {
+    if (source) {
+      source.close();
+    }
+    Serial.printf("[storage-index] cannot open source: %s\n", path.c_str());
+    notifyStatus("Index failed", displayNameForPath(path).c_str(), "File unreadable", 100);
+    return false;
+  }
+
+  const size_t sourceBytes = source.size();
+  if (sourceBytes == 0 || sourceBytes > UINT32_MAX) {
+    source.close();
+    Serial.printf("[storage-index] unsupported source size: %s (%lu bytes)\n",
+                  path.c_str(), static_cast<unsigned long>(sourceBytes));
+    notifyStatus("Index failed", displayNameForPath(path).c_str(),
+                 sourceBytes == 0 ? "No readable words" : "Book too large", 100);
+    return false;
+  }
+  const uint32_t fingerprint = sourceFingerprint(source, static_cast<uint32_t>(sourceBytes));
+  if (!source.seek(0)) {
+    source.close();
+    Serial.printf("[storage-index] source rewind failed: %s\n", path.c_str());
+    notifyStatus("Index failed", displayNameForPath(path).c_str(), "Source read failed", 100);
+    return false;
+  }
+
+  const String label = displayNameForPath(path);
+  notifyStatus("Indexing book", label.c_str(), "Building word index", 0);
+
+  const String indexPath = indexedIndexPathFor(path);
+  const String dataPath = indexedDataPathFor(path);
+  const String tmpIndexPath = indexedTempPathFor(indexPath);
+  const String tmpDataPath = indexedTempPathFor(dataPath);
+  SD_MMC.remove(tmpIndexPath);
+  SD_MMC.remove(tmpDataPath);
+
+  File indexFile = SD_MMC.open(tmpIndexPath, FILE_WRITE);
+  File dataFile = SD_MMC.open(tmpDataPath, FILE_WRITE);
+  if (!indexFile || !dataFile) {
+    if (indexFile) {
+      indexFile.close();
+    }
+    if (dataFile) {
+      dataFile.close();
+    }
+    source.close();
+    SD_MMC.remove(tmpIndexPath);
+    SD_MMC.remove(tmpDataPath);
+    notifyStatus("Index failed", label.c_str(), "SD write failed", 100);
+    return false;
+  }
+
+  IndexedBookStore::Header header;
+  if (!writeExact(indexFile, &header, sizeof(header))) {
+    indexFile.close();
+    dataFile.close();
+    source.close();
+    SD_MMC.remove(tmpIndexPath);
+    SD_MMC.remove(tmpDataPath);
+    notifyStatus("Index failed", label.c_str(), "SD write failed", 100);
+    return false;
+  }
+
+  IndexedBuildContext context;
+  context.indexFile = &indexFile;
+  context.dataFile = &dataFile;
+  context.metadata = &metadata;
+
+  String line;
+  line.reserve(256);
+  bool paragraphPending = true;
+  bool keepReading = true;
+  bool parseFailed = false;
+  ParseStats stats;
+
+  constexpr size_t kBufSize = 4096;
+  static uint8_t buf[kBufSize];
+  size_t totalBytesRead = 0;
+  size_t nextProgressBytes = 0;
+  const uint32_t startedMs = millis();
+
+  while (keepReading && source.available()) {
+    const size_t bytesRead = source.read(buf, kBufSize);
+    if (bytesRead == 0) {
+      break;
+    }
+    totalBytesRead += bytesRead;
+
+    if (sourceBytes > 0 && totalBytesRead >= nextProgressBytes) {
+      const int progress = static_cast<int>(
+          std::min<size_t>(90, (totalBytesRead * 90UL) / sourceBytes));
+      notifyStatus("Indexing book", label.c_str(), "Building word index", progress);
+      nextProgressBytes = totalBytesRead + 256 * 1024;
+    }
+    yield();
+
+    for (size_t i = 0; i < bytesRead && keepReading; ++i) {
+      const char c = static_cast<char>(buf[i]);
+
+      if (c == '\r') {
+        continue;
+      }
+
+      if (c == '\n') {
+        keepReading = rsvpFormat
+                          ? processIndexedRsvpLine(line, context, paragraphPending, &stats)
+                          : processIndexedBookLine(line, context, paragraphPending, &stats);
+        if (!keepReading && hasBookWordLimit()) {
+          Serial.printf("[storage-index] Reached %lu word limit, truncating book\n",
+                        static_cast<unsigned long>(kMaxBookWords));
+        } else if (!keepReading && (stats.memoryLow || context.failed)) {
+          parseFailed = true;
+        }
+        line = "";
+        continue;
+      }
+
+      line += c;
+      if (line.length() >= kMaxBookLineChars) {
+        keepReading = rsvpFormat
+                          ? processIndexedRsvpLine(line, context, paragraphPending, &stats)
+                          : processIndexedBookLine(line, context, paragraphPending, &stats);
+        ++stats.longLineSplits;
+        if (!keepReading && (stats.memoryLow || context.failed)) {
+          parseFailed = true;
+        }
+        line = "";
+      }
+    }
+  }
+
+  if (!line.isEmpty() && keepReading && !reachedBookWordLimit(context.wordCount)) {
+    keepReading = rsvpFormat ? processIndexedRsvpLine(line, context, paragraphPending, &stats)
+                             : processIndexedBookLine(line, context, paragraphPending, &stats);
+    if (!keepReading && (stats.memoryLow || context.failed)) {
+      parseFailed = true;
+    }
+  }
+
+  if (stats.longLineSplits > 0 || stats.malformedUtf8 > 0 || stats.nonAsciiCodepoints > 0) {
+    Serial.printf("[storage-index] Parse cleanup: long_lines=%u malformed_utf8=%u non_ascii=%u\n",
+                  static_cast<unsigned int>(stats.longLineSplits),
+                  static_cast<unsigned int>(stats.malformedUtf8),
+                  static_cast<unsigned int>(stats.nonAsciiCodepoints));
+  }
+
+  if (parseFailed || context.wordCount == 0) {
+    const char *detail = context.failure[0] == '\0' ? "No readable words" : context.failure;
+    indexFile.close();
+    dataFile.close();
+    source.close();
+    SD_MMC.remove(tmpIndexPath);
+    SD_MMC.remove(tmpDataPath);
+    metadata.clear();
+    notifyStatus("Index failed", label.c_str(), detail, 100);
+    return false;
+  }
+
+  if (metadata.paragraphStarts.empty()) {
+    metadata.paragraphStarts.push_back(0);
+  }
+  if (metadata.title.isEmpty()) {
+    metadata.title = normalizeDisplayText(displayNameWithoutExtension(path));
+  }
+
+  header.magic = IndexedBookStore::kMagic;
+  header.version = IndexedBookStore::kVersion;
+  header.headerSize = sizeof(IndexedBookStore::Header);
+  header.recordSize = sizeof(IndexedBookStore::WordRecord);
+  header.sourceSize = static_cast<uint32_t>(sourceBytes);
+  header.sourceFingerprint = fingerprint;
+  header.wordCount = context.wordCount;
+  header.paragraphCount = static_cast<uint32_t>(metadata.paragraphStarts.size());
+  header.chapterCount = static_cast<uint32_t>(metadata.chapters.size());
+  header.recordsOffset = sizeof(IndexedBookStore::Header);
+  header.paragraphsOffset =
+      header.recordsOffset + header.wordCount * sizeof(IndexedBookStore::WordRecord);
+  header.chaptersOffset = header.paragraphsOffset + header.paragraphCount * sizeof(uint32_t);
+  header.dataSize = context.dataSize;
+
+  if (!indexFile.seek(header.paragraphsOffset)) {
+    parseFailed = true;
+  }
+
+  for (size_t i = 0; !parseFailed && i < metadata.paragraphStarts.size(); ++i) {
+    const uint32_t wordIndex = static_cast<uint32_t>(metadata.paragraphStarts[i]);
+    parseFailed = !writeExact(indexFile, &wordIndex, sizeof(wordIndex));
+  }
+
+  if (!parseFailed && !indexFile.seek(header.chaptersOffset)) {
+    parseFailed = true;
+  }
+
+  for (size_t i = 0; !parseFailed && i < metadata.chapters.size(); ++i) {
+    IndexedBookStore::ChapterRecord record;
+    record.wordIndex = static_cast<uint32_t>(metadata.chapters[i].wordIndex);
+    const String &title = metadata.chapters[i].title;
+    record.titleLength = std::min<uint32_t>(title.length(), sizeof(record.title));
+    for (uint32_t j = 0; j < record.titleLength; ++j) {
+      record.title[j] = title[j];
+    }
+    parseFailed = !writeExact(indexFile, &record, sizeof(record));
+  }
+
+  if (!parseFailed && (!indexFile.seek(0) || !writeExact(indexFile, &header, sizeof(header)))) {
+    parseFailed = true;
+  }
+
+  indexFile.close();
+  dataFile.close();
+  source.close();
+
+  if (parseFailed) {
+    SD_MMC.remove(tmpIndexPath);
+    SD_MMC.remove(tmpDataPath);
+    metadata.clear();
+    notifyStatus("Index failed", label.c_str(), "SD write failed", 100);
+    return false;
+  }
+
+  SD_MMC.remove(indexPath);
+  SD_MMC.remove(dataPath);
+  const bool renamed =
+      SD_MMC.rename(tmpIndexPath, indexPath) && SD_MMC.rename(tmpDataPath, dataPath);
+  if (!renamed) {
+    SD_MMC.remove(tmpIndexPath);
+    SD_MMC.remove(tmpDataPath);
+    SD_MMC.remove(indexPath);
+    SD_MMC.remove(dataPath);
+    metadata.clear();
+    notifyStatus("Index failed", label.c_str(), "Rename failed", 100);
+    return false;
+  }
+
+  Serial.printf("[storage-index] Built %u words, %u chapters from %s in %lu ms\n",
+                static_cast<unsigned int>(metadata.wordCount),
+                static_cast<unsigned int>(metadata.chapters.size()), path.c_str(),
+                static_cast<unsigned long>(millis() - startedMs));
+  notifyStatus("Index ready", label.c_str(), "Book ready", 100);
+  return true;
+}
+
+bool StorageManager::ensureIndexedBook(const String &path, BookMetadata &metadata,
+                                       bool rsvpFormat, bool allowIndexBuild) {
+  if (readIndexedMetadata(path, metadata)) {
+    notifyStatus("Opening book", displayNameForPath(path).c_str(), "Index is current", 45);
+    return true;
+  }
+
+  if (!allowIndexBuild) {
+    notifyStatus("Index needed", displayNameForPath(path).c_str(), "Open from library", 100);
+    return false;
+  }
+
+  Serial.printf("[storage-index] rebuilding missing/stale index: %s\n", path.c_str());
+  notifyStatus("Opening book", displayNameForPath(path).c_str(), "Index needs rebuild", 20);
+  if (!buildIndexedBook(path, metadata, rsvpFormat)) {
+    return false;
+  }
+  if (!readIndexedMetadata(path, metadata)) {
+    Serial.printf("[storage-index] freshly built index failed validation: %s\n", path.c_str());
+    notifyStatus("Index failed", displayNameForPath(path).c_str(), "Validation failed", 100);
+    return false;
+  }
+  return true;
+}
+
+bool StorageManager::loadIndexedBook(size_t index, IndexedBookStore &store,
+                                     BookMetadata &metadata, String *loadedPath,
+                                     size_t *loadedIndex, bool allowIndexBuild,
+                                     bool allowEpubConversion) {
+  metadata.clear();
+
+  if (!mounted_) {
+    Serial.println("[storage] SD not mounted, cannot load indexed book");
+    notifyStatus("Book open failed", "SD not mounted", "Check card", 100);
+    return false;
+  }
+
+  if (!booksDirectoryExists()) {
+    Serial.println("[storage] /books directory not found");
+    notifyStatus("Book open failed", "Folders missing", "Run SD check", 100);
+    return false;
+  }
+
+  if (bookPaths_.empty()) {
+    refreshBookPaths(false);
+  }
+  if (bookPaths_.empty()) {
+    Serial.println("[storage] No readable .rsvp, .txt, or .epub books found under /books");
+    notifyStatus("Book open failed", "No books found", "Add books to SD", 100);
+    return false;
+  }
+
+  if (index >= bookPaths_.size()) {
+    Serial.printf("[storage] Book index %u out of range\n", static_cast<unsigned int>(index));
+    notifyStatus("Book open failed", "Library changed", "Open list again", 100);
+    return false;
+  }
+
+  String path = bookPaths_[index];
+  size_t parsedIndex = index;
+  if (hasEpubExtension(path)) {
+    if (!allowEpubConversion) {
+      notifyStatus("Index needed", displayNameForPath(path).c_str(), "Open from library", 100);
+      return false;
+    }
+
+    String rsvpPath;
+    if (!ensureEpubConverted(path, rsvpPath)) {
+      return false;
+    }
+
+    refreshBookPaths();
+    const int convertedIndex = pathIndexIn(bookPaths_, rsvpPath);
+    if (convertedIndex < 0) {
+      Serial.printf("[storage] Converted RSVP not found in refreshed library: %s\n",
+                    rsvpPath.c_str());
+      notifyStatus("Book open failed", displayNameForPath(path).c_str(),
+                   "Conversion cache missing", 100);
+      return false;
+    }
+
+    path = rsvpPath;
+    parsedIndex = static_cast<size_t>(convertedIndex);
+  }
+
+  File entry = SD_MMC.open(path, FILE_READ);
+  if (!entry || entry.isDirectory()) {
+    if (entry) {
+      entry.close();
+    }
+    Serial.printf("[storage] Selected book is not readable: %s\n", path.c_str());
+    notifyStatus("Book open failed", displayNameForPath(path).c_str(), "File unreadable", 100);
+    return false;
+  }
+  entry.close();
+
+  notifyStatus("Opening book", displayNameForPath(path).c_str(), "Checking index", 12);
+  if (!ensureIndexedBook(path, metadata, hasRsvpExtension(path), allowIndexBuild)) {
+    metadata.clear();
+    return false;
+  }
+
+  IndexedBookStore::Header header;
+  if (!readIndexedMetadata(path, metadata, &header)) {
+    metadata.clear();
+    notifyStatus("Book open failed", displayNameForPath(path).c_str(), "Index invalid", 100);
+    return false;
+  }
+
+  notifyStatus("Opening book", displayNameForPath(path).c_str(), "Opening word cache", 80);
+  if (!store.open(indexedIndexPathFor(path), indexedDataPathFor(path), header)) {
+    metadata.clear();
+    notifyStatus("Book open failed", displayNameForPath(path).c_str(), "Index unreadable", 100);
+    return false;
+  }
+
+  if (loadedPath != nullptr) {
+    *loadedPath = path;
+  }
+  if (loadedIndex != nullptr) {
+    *loadedIndex = parsedIndex;
+  }
+
+  Serial.printf("[storage] Opened indexed book %s: %u words, %u chapters\n", path.c_str(),
+                static_cast<unsigned int>(metadata.wordCount),
+                static_cast<unsigned int>(metadata.chapters.size()));
+  return true;
 }
 
 bool StorageManager::loadBookWords(size_t index, std::vector<String> &words, String *loadedPath,
