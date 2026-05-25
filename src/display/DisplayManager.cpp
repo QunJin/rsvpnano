@@ -14,7 +14,7 @@
 #include "display/EmbeddedOpenDyslexicFont70.h"
 #include "display/EmbeddedSerifFont.h"
 #include "display/EmbeddedSerifFont70.h"
-#include "display/axs15231b.h"
+#include "display/BoardDisplay.h"
 #include "text/LatinText.h"
 
 namespace {
@@ -89,7 +89,7 @@ constexpr int kVirtualBufferWidth = kDisplayWidth;
 constexpr int kVirtualBufferHeight = kPanelNativeHeight;
 
 constexpr size_t kBytesPerPixel = sizeof(uint16_t);
-constexpr size_t kMaxChunkBytes = 16 * 1024;
+constexpr size_t kMaxChunkBytes = BoardConfig::DISPLAY_TX_CHUNK_BYTES;
 constexpr int kTxBufferWidth = kDisplayWidth > kPanelNativeWidth ? kDisplayWidth : kPanelNativeWidth;
 constexpr int kMaxChunkPhysicalRows = kMaxChunkBytes / (kTxBufferWidth * kBytesPerPixel);
 static_assert(kMaxChunkPhysicalRows > 0, "Display chunk buffer must hold at least one row");
@@ -913,8 +913,8 @@ void DisplayManager::setUiOrientation(BoardConfig::UiOrientation orientation) {
 }
 
 void DisplayManager::setUiRotated180(bool rotated180) {
-  setUiOrientation(rotated180 ? BoardConfig::UiOrientation::LandscapeFlipped
-                              : BoardConfig::UiOrientation::Landscape);
+  setUiOrientation(rotated180 ? BoardConfig::ROTATED_UI_ORIENTATION
+                              : BoardConfig::DEFAULT_UI_ORIENTATION);
 }
 
 void DisplayManager::setTypographyConfig(const TypographyConfig &config) {
@@ -967,7 +967,7 @@ bool DisplayManager::begin() {
   lastRenderKey_ = "";
   fillScreen(backgroundColor());
   applyBrightness();
-  ESP_LOGI(kDisplayTag, "AXS15231B LCD initialized");
+  ESP_LOGI(kDisplayTag, "Display initialized for %s", BoardConfig::BOARD_LABEL);
   return true;
 }
 
@@ -977,7 +977,7 @@ void DisplayManager::prepareForSleep() {
   }
 
   fillScreen(kTrueBlack);
-  axs15231bSleep();
+  boardDisplaySleep();
   initialized_ = false;
   tickerPlaybackFrameActive_ = false;
   lastRenderKey_ = "";
@@ -989,7 +989,7 @@ bool DisplayManager::wakeFromSleep() {
     return false;
   }
 
-  axs15231bWake();
+  boardDisplayWake();
   initialized_ = true;
   tickerPlaybackFrameActive_ = false;
   lastRenderKey_ = "";
@@ -1019,7 +1019,9 @@ bool DisplayManager::allocateBuffers() {
 }
 
 bool DisplayManager::initPanel() {
-  axs15231bInit();
+  if (!boardDisplayInit()) {
+    return false;
+  }
   ESP_LOGI(kDisplayTag, "Panel init sequence complete");
   return true;
 }
@@ -1029,11 +1031,10 @@ bool DisplayManager::drawBitmap(int xStart, int yStart, int xEnd, int yEnd, cons
     return false;
   }
 
-  axs15231bPushColors(static_cast<uint16_t>(xStart), static_cast<uint16_t>(yStart),
-                      static_cast<uint16_t>(xEnd - xStart),
-                      static_cast<uint16_t>(yEnd - yStart),
-                      static_cast<const uint16_t *>(colorData));
-  return true;
+  return boardDisplayPushColors(static_cast<uint16_t>(xStart), static_cast<uint16_t>(yStart),
+                                static_cast<uint16_t>(xEnd - xStart),
+                                static_cast<uint16_t>(yEnd - yStart),
+                                static_cast<const uint16_t *>(colorData));
 }
 
 void DisplayManager::fillScreen(uint16_t color) {
@@ -1729,8 +1730,8 @@ void DisplayManager::drawMenuItem(const String &item, int y, bool selected) {
 }
 
 void DisplayManager::applyBrightness() {
-  axs15231bSetBrightnessPercent(brightnessPercent_);
-  axs15231bSetBacklight(true);
+  boardDisplaySetBrightnessPercent(brightnessPercent_);
+  boardDisplaySetBacklight(true);
 }
 
 void DisplayManager::flushScaledFrame(int scale, int virtualWidth, int virtualHeight) {

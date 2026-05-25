@@ -13,6 +13,7 @@ constexpr uint8_t kReadTouchCommand[] = {
 constexpr uint32_t kPollIntervalMs = 20;
 constexpr uint32_t kFailureBackoffMs = 250;
 constexpr uint8_t kReleaseConfirmSamples = 2;
+constexpr uint8_t kFt6336PointsReg = 0x02;
 
 uint16_t clampDisplayX(uint16_t x) {
   return std::min<uint16_t>(x, static_cast<uint16_t>(BoardConfig::DISPLAY_WIDTH - 1));
@@ -30,6 +31,8 @@ uint16_t clampPhysicalY(uint16_t y) {
   return std::min<uint16_t>(y, static_cast<uint16_t>(BoardConfig::PANEL_NATIVE_HEIGHT - 1));
 }
 
+TwoWire &touchWire() { return BoardConfig::TOUCH_USES_WIRE1 ? Wire1 : Wire; }
+
 }  // namespace
 
 bool TouchHandler::begin() {
@@ -41,14 +44,24 @@ bool TouchHandler::begin() {
   touchActive_ = false;
   lastX_ = 0;
   lastY_ = 0;
-  Wire.beginTransmission(kAddress);
-  const uint8_t error = Wire.endTransmission();
+
+  if (BoardConfig::PIN_TOUCH_RST >= 0) {
+    pinMode(BoardConfig::PIN_TOUCH_RST, OUTPUT);
+    digitalWrite(BoardConfig::PIN_TOUCH_RST, LOW);
+    delay(12);
+    digitalWrite(BoardConfig::PIN_TOUCH_RST, HIGH);
+    delay(12);
+  }
+
+  TwoWire &wire = touchWire();
+  wire.beginTransmission(kAddress);
+  const uint8_t error = wire.endTransmission();
   initialized_ = (error == 0);
 
   if (!initialized_) {
-    Serial.println("[touch] Controller not detected at 0x3B");
+    Serial.printf("[touch] Controller not detected at 0x%02X\n", kAddress);
   } else {
-    Serial.println("[touch] Initialized (AXS15231B)");
+    Serial.printf("[touch] Initialized controller=0x%02X\n", kAddress);
   }
 
   return initialized_;
@@ -57,7 +70,9 @@ bool TouchHandler::begin() {
 void TouchHandler::end() {
   cancel();
   initialized_ = false;
-  Wire.end();
+  if (!BoardConfig::TOUCH_USES_WIRE1) {
+    Wire.end();
+  }
 }
 
 void TouchHandler::cancel() {
@@ -79,25 +94,46 @@ void TouchHandler::setUiOrientation(BoardConfig::UiOrientation orientation) {
 }
 
 void TouchHandler::setUiRotated180(bool rotated180) {
-  setUiOrientation(rotated180 ? BoardConfig::UiOrientation::LandscapeFlipped
-                              : BoardConfig::UiOrientation::Landscape);
+  setUiOrientation(rotated180 ? BoardConfig::ROTATED_UI_ORIENTATION
+                              : BoardConfig::DEFAULT_UI_ORIENTATION);
 }
 
 bool TouchHandler::readTouchPacket(uint8_t *buffer, size_t len) {
-  Wire.beginTransmission(kAddress);
-  Wire.write(kReadTouchCommand, sizeof(kReadTouchCommand));
-  if (Wire.endTransmission(false) != 0) {
+  TwoWire &wire = touchWire();
+
+  if (BoardConfig::TOUCH_CONTROLLER == BoardConfig::TouchControllerKind::Ft6336) {
+    wire.beginTransmission(kAddress);
+    wire.write(kFt6336PointsReg);
+    if (wire.endTransmission(false) != 0) {
+      return false;
+    }
+
+    const size_t readLen = wire.requestFrom(static_cast<uint8_t>(kAddress),
+                                            static_cast<size_t>(len), true);
+    if (readLen != len) {
+      return false;
+    }
+
+    for (size_t i = 0; i < len; ++i) {
+      buffer[i] = wire.read();
+    }
+    return true;
+  }
+
+  wire.beginTransmission(kAddress);
+  wire.write(kReadTouchCommand, sizeof(kReadTouchCommand));
+  if (wire.endTransmission(false) != 0) {
     return false;
   }
 
   const size_t readLen =
-      Wire.requestFrom(static_cast<uint8_t>(kAddress), static_cast<size_t>(len), true);
+      wire.requestFrom(static_cast<uint8_t>(kAddress), static_cast<size_t>(len), true);
   if (readLen != len) {
     return false;
   }
 
   for (size_t i = 0; i < len; ++i) {
-    buffer[i] = Wire.read();
+    buffer[i] = wire.read();
   }
   return true;
 }
@@ -119,8 +155,10 @@ bool TouchHandler::poll(TouchEvent &event) {
   }
   lastPollMs_ = now;
 
+  const size_t packetLength =
+      BoardConfig::TOUCH_CONTROLLER == BoardConfig::TouchControllerKind::Ft6336 ? 5 : 8;
   uint8_t data[8] = {0};
-  if (!readTouchPacket(data, sizeof(data))) {
+  if (!readTouchPacket(data, packetLength)) {
     backoffUntilMs_ = now + kFailureBackoffMs;
     if (++consecutiveReadFailures_ >= 5) {
       initialized_ = false;
@@ -130,7 +168,9 @@ bool TouchHandler::poll(TouchEvent &event) {
   }
   consecutiveReadFailures_ = 0;
 
-  const uint8_t points = data[1];
+  const uint8_t points = BoardConfig::TOUCH_CONTROLLER == BoardConfig::TouchControllerKind::Ft6336
+                             ? static_cast<uint8_t>(data[0] & 0x0F)
+                             : data[1];
   if (points == 0 || points >= 5) {
     if (touchActive_) {
       ++emptyTouchSamples_;
@@ -157,13 +197,22 @@ bool TouchHandler::poll(TouchEvent &event) {
   event.touched = true;
   event.gesture = 0;
   event.phase = touchActive_ ? TouchPhase::Move : TouchPhase::Start;
-  const uint16_t rawLongAxis = static_cast<uint16_t>(((data[2] & 0x0F) << 8) | data[3]);
-  const uint16_t rawShortAxis = static_cast<uint16_t>(((data[4] & 0x0F) << 8) | data[5]);
-  const uint16_t physicalX = clampPhysicalX(rawShortAxis);
-  const uint16_t physicalY =
-      clampPhysicalY(rawLongAxis >= BoardConfig::PANEL_NATIVE_HEIGHT
-                         ? 0
-                         : static_cast<uint16_t>(BoardConfig::PANEL_NATIVE_HEIGHT - 1 - rawLongAxis));
+
+  uint16_t physicalX = 0;
+  uint16_t physicalY = 0;
+  if (BoardConfig::TOUCH_CONTROLLER == BoardConfig::TouchControllerKind::Ft6336) {
+    physicalX = clampPhysicalX(static_cast<uint16_t>(((data[1] & 0x0F) << 8) | data[2]));
+    physicalY = clampPhysicalY(static_cast<uint16_t>(((data[3] & 0x0F) << 8) | data[4]));
+  } else {
+    const uint16_t rawLongAxis = static_cast<uint16_t>(((data[2] & 0x0F) << 8) | data[3]);
+    const uint16_t rawShortAxis = static_cast<uint16_t>(((data[4] & 0x0F) << 8) | data[5]);
+    physicalX = clampPhysicalX(rawShortAxis);
+    physicalY =
+        clampPhysicalY(rawLongAxis >= BoardConfig::PANEL_NATIVE_HEIGHT
+                           ? 0
+                           : static_cast<uint16_t>(BoardConfig::PANEL_NATIVE_HEIGHT - 1 -
+                                                   rawLongAxis));
+  }
 
   switch (uiOrientation_) {
     case BoardConfig::UiOrientation::Portrait:
@@ -175,14 +224,27 @@ bool TouchHandler::poll(TouchEvent &event) {
       event.y = static_cast<uint16_t>(BoardConfig::PANEL_NATIVE_HEIGHT - 1 - physicalY);
       break;
     case BoardConfig::UiOrientation::Landscape:
-      event.x = clampDisplayX(static_cast<uint16_t>(BoardConfig::PANEL_NATIVE_HEIGHT - 1 - physicalY));
-      event.y = clampDisplayY(physicalX);
+      if (BoardConfig::TOUCH_CONTROLLER == BoardConfig::TouchControllerKind::Ft6336) {
+        event.x = clampDisplayX(
+            static_cast<uint16_t>(BoardConfig::PANEL_NATIVE_HEIGHT - 1 - physicalY));
+        event.y = clampDisplayY(physicalX);
+      } else {
+        event.x =
+            clampDisplayX(static_cast<uint16_t>(BoardConfig::PANEL_NATIVE_HEIGHT - 1 - physicalY));
+        event.y = clampDisplayY(physicalX);
+      }
       break;
     case BoardConfig::UiOrientation::LandscapeFlipped:
     default:
-      event.x = clampDisplayX(physicalY);
-      event.y = clampDisplayY(
-          static_cast<uint16_t>(BoardConfig::PANEL_NATIVE_WIDTH - 1 - physicalX));
+      if (BoardConfig::TOUCH_CONTROLLER == BoardConfig::TouchControllerKind::Ft6336) {
+        event.x = clampDisplayX(physicalY);
+        event.y =
+            clampDisplayY(static_cast<uint16_t>(BoardConfig::PANEL_NATIVE_WIDTH - 1 - physicalX));
+      } else {
+        event.x = clampDisplayX(physicalY);
+        event.y = clampDisplayY(
+            static_cast<uint16_t>(BoardConfig::PANEL_NATIVE_WIDTH - 1 - physicalX));
+      }
       break;
   }
   touchActive_ = true;

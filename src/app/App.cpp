@@ -5767,6 +5767,10 @@ void App::playFocusTimerCompletionCue() {
     return;
   }
 
+  if (!BoardConfig::HAS_LCD_BACKLIGHT || BoardConfig::PIN_LCD_BACKLIGHT < 0) {
+    return;
+  }
+
   for (int i = 0; i < 3; ++i) {
     digitalWrite(BoardConfig::PIN_LCD_BACKLIGHT, HIGH);
     delay(55);

@@ -9,6 +9,95 @@ namespace BoardConfig {
 
 namespace {
 
+uint8_t batteryPercentForVoltage(float voltage) {
+  struct Point {
+    float voltage;
+    uint8_t percent;
+  };
+
+  constexpr Point kCurve[] = {
+      {3.30f, 0},  {3.50f, 5},  {3.60f, 10}, {3.65f, 20},
+      {3.70f, 30}, {3.75f, 40}, {3.79f, 50}, {3.85f, 60},
+      {3.92f, 70}, {4.00f, 80}, {4.10f, 90}, {4.20f, 100},
+  };
+
+  if (voltage <= kCurve[0].voltage) {
+    return kCurve[0].percent;
+  }
+  constexpr size_t curveSize = sizeof(kCurve) / sizeof(kCurve[0]);
+  if (voltage >= kCurve[curveSize - 1].voltage) {
+    return kCurve[curveSize - 1].percent;
+  }
+
+  for (size_t i = 1; i < curveSize; ++i) {
+    const Point &upper = kCurve[i];
+    const Point &lower = kCurve[i - 1];
+    if (voltage > upper.voltage) {
+      continue;
+    }
+
+    const float span = upper.voltage - lower.voltage;
+    const float ratio = span <= 0.0f ? 0.0f : (voltage - lower.voltage) / span;
+    const int percent =
+        static_cast<int>(lower.percent + (upper.percent - lower.percent) * ratio + 0.5f);
+    return static_cast<uint8_t>(std::max(0, std::min(100, percent)));
+  }
+
+  return 0;
+}
+
+#if defined(RSVP_BOARD_WAVESHARE_ESP32S3_TOUCH_AMOLED_241)
+
+constexpr float kBatteryDividerScale = 0.003f;
+bool gBatteryPowerHoldEnabled = false;
+
+void configureBatteryHoldIfAvailable() {
+  if (PIN_BATTERY_HOLD < 0) {
+    return;
+  }
+
+  pinMode(PIN_BATTERY_HOLD, OUTPUT);
+  digitalWrite(PIN_BATTERY_HOLD, HIGH);
+  gBatteryPowerHoldEnabled = true;
+}
+
+void configureTouchResetIfAvailable() {
+  if (PIN_TOUCH_RST < 0) {
+    return;
+  }
+
+  pinMode(PIN_TOUCH_RST, OUTPUT);
+  digitalWrite(PIN_TOUCH_RST, LOW);
+  delay(12);
+  digitalWrite(PIN_TOUCH_RST, HIGH);
+  delay(12);
+}
+
+void configureTouchWire() {
+  if (TOUCH_USES_WIRE1) {
+    Wire1.begin(PIN_TOUCH_SDA, PIN_TOUCH_SCL);
+    Wire1.setClock(400000);
+    Wire1.setTimeOut(10);
+    return;
+  }
+
+  Wire.begin(PIN_TOUCH_SDA, PIN_TOUCH_SCL);
+  Wire.setClock(400000);
+  Wire.setTimeOut(10);
+}
+
+void configureSystemWire() {
+  if (PIN_I2C_SDA < 0 || PIN_I2C_SCL < 0 || TOUCH_USES_WIRE1) {
+    return;
+  }
+
+  Wire1.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  Wire1.setClock(400000);
+  Wire1.setTimeOut(10);
+}
+
+#elif defined(RSVP_BOARD_WAVESHARE_ESP32S3_TOUCH_LCD_349)
+
 constexpr uint8_t kTca9554OutputReg = 0x01;
 constexpr uint8_t kTca9554ConfigReg = 0x03;
 bool gBatteryPowerHoldEnabled = false;
@@ -92,7 +181,6 @@ void enableBatteryAdcPathIfAvailable() {
 }
 
 void disableBatteryAdcPathIfAvailable() {
-  // Keep the battery divider gate off outside short samples; it shares the board expander.
   if (!configureTca9554OutputPin(TCA9554_PIN_BATTERY_ADC_ENABLE, true)) {
     if (gBatteryAdcPathEnabled) {
       Serial.println("[board] TCA9554 battery ADC gate disable failed");
@@ -103,53 +191,35 @@ void disableBatteryAdcPathIfAvailable() {
   gBatteryAdcPathEnabled = false;
 }
 
-uint8_t batteryPercentForVoltage(float voltage) {
-  struct Point {
-    float voltage;
-    uint8_t percent;
-  };
-
-  constexpr Point kCurve[] = {
-      {3.30f, 0},  {3.50f, 5},  {3.60f, 10}, {3.65f, 20},
-      {3.70f, 30}, {3.75f, 40}, {3.79f, 50}, {3.85f, 60},
-      {3.92f, 70}, {4.00f, 80}, {4.10f, 90}, {4.20f, 100},
-  };
-
-  if (voltage <= kCurve[0].voltage) {
-    return kCurve[0].percent;
-  }
-  constexpr size_t curveSize = sizeof(kCurve) / sizeof(kCurve[0]);
-  if (voltage >= kCurve[curveSize - 1].voltage) {
-    return kCurve[curveSize - 1].percent;
-  }
-
-  for (size_t i = 1; i < curveSize; ++i) {
-    const Point &upper = kCurve[i];
-    const Point &lower = kCurve[i - 1];
-    if (voltage > upper.voltage) {
-      continue;
-    }
-
-    const float span = upper.voltage - lower.voltage;
-    const float ratio = span <= 0.0f ? 0.0f : (voltage - lower.voltage) / span;
-    const int percent =
-        static_cast<int>(lower.percent + (upper.percent - lower.percent) * ratio + 0.5f);
-    return static_cast<uint8_t>(std::max(0, std::min(100, percent)));
-  }
-
-  return 0;
-}
+#else
+#error "Unsupported board target"
+#endif
 
 }  // namespace
 
 void begin() {
   pinMode(PIN_BOOT_BUTTON, INPUT_PULLUP);
-  pinMode(PIN_PWR_BUTTON, INPUT_PULLUP);
-  gpio_deep_sleep_hold_dis();
-  gpio_hold_dis(static_cast<gpio_num_t>(PIN_LCD_BACKLIGHT));
-  pinMode(PIN_LCD_BACKLIGHT, OUTPUT);
-  digitalWrite(PIN_LCD_BACKLIGHT, LOW);
+  if (PIN_PWR_BUTTON >= 0) {
+    pinMode(PIN_PWR_BUTTON, INPUT_PULLUP);
+  }
+  if (HAS_LCD_BACKLIGHT && PIN_LCD_BACKLIGHT >= 0) {
+    gpio_deep_sleep_hold_dis();
+    gpio_hold_dis(static_cast<gpio_num_t>(PIN_LCD_BACKLIGHT));
+    pinMode(PIN_LCD_BACKLIGHT, OUTPUT);
+    digitalWrite(PIN_LCD_BACKLIGHT, LOW);
+  }
 
+#if defined(RSVP_BOARD_WAVESHARE_ESP32S3_TOUCH_AMOLED_241)
+  configureBatteryHoldIfAvailable();
+  configureTouchWire();
+  configureSystemWire();
+  configureTouchResetIfAvailable();
+
+  pinMode(PIN_BATTERY_ADC, INPUT);
+  analogReadResolution(12);
+  analogSetPinAttenuation(PIN_BATTERY_ADC, ADC_11db);
+
+#elif defined(RSVP_BOARD_WAVESHARE_ESP32S3_TOUCH_LCD_349)
   Wire.begin(PIN_TOUCH_SDA, PIN_TOUCH_SCL);
   Wire.setClock(300000);
   Wire.setTimeOut(10);
@@ -163,6 +233,7 @@ void begin() {
   pinMode(PIN_BATTERY_ADC, INPUT);
   analogReadResolution(12);
   analogSetPinAttenuation(PIN_BATTERY_ADC, ADC_11db);
+#endif
 }
 
 void lightSleepUntilBootButton() {
@@ -176,6 +247,10 @@ void lightSleepUntilBootButton() {
 }
 
 void holdBacklightOffForDeepSleep() {
+  if (!HAS_LCD_BACKLIGHT || PIN_LCD_BACKLIGHT < 0) {
+    return;
+  }
+
   const gpio_num_t backlightPin = static_cast<gpio_num_t>(PIN_LCD_BACKLIGHT);
 
   // The LCD backlight is active-low. Hold the inactive level while the ESP32 is in deep sleep,
@@ -191,6 +266,42 @@ void holdBacklightOffForDeepSleep() {
 
 bool readBatteryStatus(BatteryStatus &status) {
   status = BatteryStatus{};
+
+#if defined(RSVP_BOARD_WAVESHARE_ESP32S3_TOUCH_AMOLED_241)
+  uint32_t millivoltsTotal = 0;
+  uint8_t samples = 0;
+  for (uint8_t i = 0; i < 8; ++i) {
+    const uint32_t sample = analogReadMilliVolts(PIN_BATTERY_ADC);
+    if (sample > 0) {
+      millivoltsTotal += sample;
+      ++samples;
+    }
+    delayMicroseconds(250);
+  }
+
+  if (samples == 0) {
+    uint32_t rawTotal = 0;
+    for (uint8_t i = 0; i < 8; ++i) {
+      rawTotal += analogRead(PIN_BATTERY_ADC);
+      delayMicroseconds(250);
+    }
+    const float pinMillivolts = (static_cast<float>(rawTotal) / 8.0f) * 3300.0f / 4095.0f;
+    status.voltage = pinMillivolts * kBatteryDividerScale;
+  } else {
+    const float pinMillivolts = static_cast<float>(millivoltsTotal) / samples;
+    status.voltage = pinMillivolts * kBatteryDividerScale;
+  }
+
+  status.present = status.voltage >= 2.5f && status.voltage <= 4.6f;
+  if (!status.present) {
+    status.percent = 0;
+    return false;
+  }
+
+  status.percent = batteryPercentForVoltage(status.voltage);
+  return true;
+
+#elif defined(RSVP_BOARD_WAVESHARE_ESP32S3_TOUCH_LCD_349)
   enableBatteryAdcPathIfAvailable();
   delay(12);
 
@@ -239,9 +350,21 @@ bool readBatteryStatus(BatteryStatus &status) {
 
   status.percent = batteryPercentForVoltage(status.voltage);
   return true;
+#endif
 }
 
 bool releaseBatteryPowerHold() {
+#if defined(RSVP_BOARD_WAVESHARE_ESP32S3_TOUCH_AMOLED_241)
+  if (PIN_BATTERY_HOLD < 0) {
+    return false;
+  }
+
+  digitalWrite(PIN_BATTERY_HOLD, LOW);
+  gBatteryPowerHoldEnabled = false;
+  Serial.println("[board] Battery power hold released");
+  return true;
+
+#elif defined(RSVP_BOARD_WAVESHARE_ESP32S3_TOUCH_LCD_349)
   if (!configureTca9554OutputPin(TCA9554_PIN_SYS_EN, false)) {
     Serial.println("[board] Battery power hold release failed");
     return false;
@@ -250,6 +373,7 @@ bool releaseBatteryPowerHold() {
   gBatteryPowerHoldEnabled = false;
   Serial.println("[board] Battery power hold released");
   return true;
+#endif
 }
 
 }  // namespace BoardConfig
