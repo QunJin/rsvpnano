@@ -5,6 +5,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/task.h>
+#include <memory>
 #include <vector>
 
 #include "app/AppState.h"
@@ -15,6 +16,7 @@
 #include "input/TouchHandler.h"
 #include "reader/ReadingLoop.h"
 #include "rss/RssFeedManager.h"
+#include "standby/Screensaver.h"
 #include "storage/StorageManager.h"
 #include "sync/CompanionSyncManager.h"
 #include "timer/FocusTimer.h"
@@ -298,13 +300,7 @@ class App {
   void exitStandby(uint32_t nowMs);
   void seedStandbyScreensaver(uint32_t nowMs);
   void stepStandbyScreensaver(uint32_t nowMs);
-  void seedStandbyLife(uint32_t nowMs);
-  void stepStandbyLife();
-  void seedStandbyMaze(uint32_t nowMs);
-  void stepStandbyMaze();
-  void seedStandbyVoronoi(uint32_t nowMs);
-  void stepStandbyVoronoi();
-  void renderStandbyVoronoi();
+  uint32_t standbyRngSeed(uint32_t nowMs) const;
   void seedStandbyScreenOff(uint32_t nowMs);
   void updateStandbyScreensaver(uint32_t nowMs, bool force = false);
   void enterPowerOff(uint32_t nowMs);
@@ -433,8 +429,6 @@ class App {
   uint32_t standbyComboStartedMs_ = 0;
   uint32_t standbyEnteredMs_ = 0;
   uint32_t lastStandbyFrameMs_ = 0;
-  uint32_t standbyLifeGeneration_ = 0;
-  uint32_t standbyScreensaverRng_ = 1;
   uint32_t chapterTransitionUntilMs_ = 0;
   uint32_t lastLowBatteryWarningMs_ = 0;
   uint32_t batteryWarningRestoreAtMs_ = 0;
@@ -486,15 +480,7 @@ class App {
   std::vector<DisplayManager::ContextWord> contextPreviewWords_;
   std::vector<WifiNetworkInfo> wifiNetworks_;
   std::vector<TextEntryButton> textEntryButtons_;
-  std::vector<uint32_t> standbyLifeCells_;
-  std::vector<uint32_t> standbyLifeNextCells_;
-  std::vector<uint32_t> standbyScreensaverDimCells_;
-  std::vector<uint8_t> standbyMazeVisited_;
-  std::vector<uint16_t> standbyMazeStack_;
-  std::vector<int16_t> standbyVoronoiX_;
-  std::vector<int16_t> standbyVoronoiY_;
-  std::vector<int16_t> standbyVoronoiDx_;
-  std::vector<int16_t> standbyVoronoiDy_;
+  std::unique_ptr<standby::Screensaver> screensaver_;
   String currentBookPath_;
   String currentBookTitle_;
   String pendingUpdateCurrentVersion_;
