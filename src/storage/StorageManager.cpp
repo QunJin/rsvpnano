@@ -295,12 +295,6 @@ String epubSiblingPathForRsvp(const String &rsvpPath) {
   return siblingPathWithExtension(rsvpPath, ".epub");
 }
 
-String normalizeBookPath(const String &path) {
-  if (path.startsWith("/")) {
-    return path;
-  }
-  return String(kBooksPath) + "/" + path;
-}
 
 String displayNameForPath(const String &path) {
   const int separator = path.lastIndexOf('/');
@@ -1999,7 +1993,20 @@ bool pushIndexedWord(String token, IndexedBuildContext &context,
   record.length = static_cast<uint16_t>(token.length());
   record.flags = 0;
 
-  if (!context.dataWriter->write(token.c_str(), token.length()) ||
+  if (context.dataWriter == nullptr && context.indexWriter == nullptr) {
+    context.failed = true;
+    context.failure = "Index writer missing";
+    return false;
+  }
+
+  if (context.dataWriter != nullptr &&
+      !context.dataWriter->write(token.c_str(), token.length())) {
+    context.failed = true;
+    context.failure = "SD write failed";
+    return false;
+  }
+
+  if (context.indexWriter != nullptr &&
       !context.indexWriter->write(&record, sizeof(record))) {
     context.failed = true;
     context.failure = "SD write failed";
@@ -2612,134 +2619,112 @@ bool StorageManager::buildIndexedBook(const String &path,
   SD_MMC.remove(tmpIndexPath);
   SD_MMC.remove(tmpDataPath);
 
-  errno = 0;
-  File indexFile = SD_MMC.open(tmpIndexPath, FILE_WRITE);
-  const int indexOpenErrno = errno;
+  auto parseIndexedSource = [&](File &parseSource,
+                                IndexedBuildContext &context,
+                                ParseStats &stats,
+                                bool reportProgress) -> bool {
+    String line;
+    line.reserve(256);
+    bool paragraphPending = true;
+    bool keepReading = true;
+    bool parseFailed = false;
+
+    constexpr size_t kBufSize = 4096;
+    static uint8_t buf[kBufSize];
+    size_t totalBytesRead = 0;
+    size_t nextProgressBytes = 0;
+
+    while (keepReading && parseSource.available()) {
+      const size_t bytesRead = parseSource.read(buf, kBufSize);
+      if (bytesRead == 0) {
+        break;
+      }
+      totalBytesRead += bytesRead;
+
+      if (reportProgress && sourceBytes > 0 &&
+          totalBytesRead >= nextProgressBytes) {
+        const int progress = static_cast<int>(
+            std::min<size_t>(90, (totalBytesRead * 90UL) / sourceBytes));
+        notifyStatus("Indexing book", label.c_str(), "Building word index",
+                     progress);
+        nextProgressBytes = totalBytesRead + 256 * 1024;
+      }
+      yield();
+
+      for (size_t i = 0; i < bytesRead && keepReading; ++i) {
+        const char c = static_cast<char>(buf[i]);
+
+        if (c == '\r') {
+          continue;
+        }
+
+        if (c == '\n') {
+          keepReading = rsvpFormat
+                            ? processIndexedRsvpLine(line, context,
+                                                     paragraphPending, &stats)
+                            : processIndexedBookLine(line, context,
+                                                     paragraphPending, &stats);
+          if (!keepReading && hasBookWordLimit()) {
+            Serial.printf(
+                "[storage-index] Reached %lu word limit, truncating book\n",
+                static_cast<unsigned long>(kMaxBookWords));
+          } else if (!keepReading && (stats.memoryLow || context.failed)) {
+            parseFailed = true;
+          }
+          line = "";
+          continue;
+        }
+
+        line += c;
+        if (line.length() >= kMaxBookLineChars) {
+          keepReading = rsvpFormat
+                            ? processIndexedRsvpLine(line, context,
+                                                     paragraphPending, &stats)
+                            : processIndexedBookLine(line, context,
+                                                     paragraphPending, &stats);
+          ++stats.longLineSplits;
+          if (!keepReading && (stats.memoryLow || context.failed)) {
+            parseFailed = true;
+          }
+          line = "";
+        }
+      }
+    }
+
+    if (!line.isEmpty() && keepReading &&
+        !reachedBookWordLimit(context.wordCount)) {
+      keepReading =
+          rsvpFormat
+              ? processIndexedRsvpLine(line, context, paragraphPending, &stats)
+              : processIndexedBookLine(line, context, paragraphPending, &stats);
+      if (!keepReading && (stats.memoryLow || context.failed)) {
+        parseFailed = true;
+      }
+    }
+
+    return !parseFailed;
+  };
+
   errno = 0;
   File dataFile = SD_MMC.open(tmpDataPath, FILE_WRITE);
   const int dataOpenErrno = errno;
-  if (!indexFile || !dataFile) {
-    if (!indexFile) {
-      logFsErrno("storage-index", "open index FILE_WRITE", tmpIndexPath,
-                 indexOpenErrno);
-    }
-    if (!dataFile) {
-      logFsErrno("storage-index", "open data FILE_WRITE", tmpDataPath,
-                 dataOpenErrno);
-    }
-    if (indexFile) {
-      indexFile.close();
-    }
-    if (dataFile) {
-      dataFile.close();
-    }
+  if (!dataFile) {
+    logFsErrno("storage-index", "open data FILE_WRITE", tmpDataPath,
+               dataOpenErrno);
     source.close();
-    SD_MMC.remove(tmpIndexPath);
     SD_MMC.remove(tmpDataPath);
     notifyStatus("Index failed", label.c_str(), "SD write failed", 100);
     return false;
   }
 
-  IndexedBookStore::Header header;
-  BufferedWriter indexWriter(indexFile);
   BufferedWriter dataWriter(dataFile);
-
-  if (!indexWriter.write(&header, sizeof(header))) {
-    indexWriter.discard();
-    dataWriter.discard();
-    indexFile.close();
-    dataFile.close();
-    source.close();
-    SD_MMC.remove(tmpIndexPath);
-    SD_MMC.remove(tmpDataPath);
-    notifyStatus("Index failed", label.c_str(), "SD write failed", 100);
-    return false;
-  }
-
-  IndexedBuildContext context;
-  context.indexWriter = &indexWriter;
-  context.dataWriter = &dataWriter;
-  context.metadata = &metadata;
-
-  String line;
-  line.reserve(256);
-  bool paragraphPending = true;
-  bool keepReading = true;
-  bool parseFailed = false;
+  IndexedBuildContext dataContext;
+  dataContext.dataWriter = &dataWriter;
+  dataContext.metadata = &metadata;
   ParseStats stats;
-
-  constexpr size_t kBufSize = 4096;
-  static uint8_t buf[kBufSize];
-  size_t totalBytesRead = 0;
-  size_t nextProgressBytes = 0;
   const uint32_t startedMs = millis();
 
-  while (keepReading && source.available()) {
-    const size_t bytesRead = source.read(buf, kBufSize);
-    if (bytesRead == 0) {
-      break;
-    }
-    totalBytesRead += bytesRead;
-
-    if (sourceBytes > 0 && totalBytesRead >= nextProgressBytes) {
-      const int progress = static_cast<int>(
-          std::min<size_t>(90, (totalBytesRead * 90UL) / sourceBytes));
-      notifyStatus("Indexing book", label.c_str(), "Building word index",
-                   progress);
-      nextProgressBytes = totalBytesRead + 256 * 1024;
-    }
-    yield();
-
-    for (size_t i = 0; i < bytesRead && keepReading; ++i) {
-      const char c = static_cast<char>(buf[i]);
-
-      if (c == '\r') {
-        continue;
-      }
-
-      if (c == '\n') {
-        keepReading = rsvpFormat
-                          ? processIndexedRsvpLine(line, context,
-                                                   paragraphPending, &stats)
-                          : processIndexedBookLine(line, context,
-                                                   paragraphPending, &stats);
-        if (!keepReading && hasBookWordLimit()) {
-          Serial.printf(
-              "[storage-index] Reached %lu word limit, truncating book\n",
-              static_cast<unsigned long>(kMaxBookWords));
-        } else if (!keepReading && (stats.memoryLow || context.failed)) {
-          parseFailed = true;
-        }
-        line = "";
-        continue;
-      }
-
-      line += c;
-      if (line.length() >= kMaxBookLineChars) {
-        keepReading = rsvpFormat
-                          ? processIndexedRsvpLine(line, context,
-                                                   paragraphPending, &stats)
-                          : processIndexedBookLine(line, context,
-                                                   paragraphPending, &stats);
-        ++stats.longLineSplits;
-        if (!keepReading && (stats.memoryLow || context.failed)) {
-          parseFailed = true;
-        }
-        line = "";
-      }
-    }
-  }
-
-  if (!line.isEmpty() && keepReading &&
-      !reachedBookWordLimit(context.wordCount)) {
-    keepReading =
-        rsvpFormat
-            ? processIndexedRsvpLine(line, context, paragraphPending, &stats)
-            : processIndexedBookLine(line, context, paragraphPending, &stats);
-    if (!keepReading && (stats.memoryLow || context.failed)) {
-      parseFailed = true;
-    }
-  }
+  bool parseFailed = !parseIndexedSource(source, dataContext, stats, true);
 
   if (stats.longLineSplits > 0 || stats.malformedUtf8 > 0 ||
       stats.nonAsciiCodepoints > 0) {
@@ -2750,15 +2735,13 @@ bool StorageManager::buildIndexedBook(const String &path,
                   static_cast<unsigned int>(stats.nonAsciiCodepoints));
   }
 
-  if (parseFailed || context.wordCount == 0) {
+  if (parseFailed || dataContext.wordCount == 0) {
     const char *detail =
-        context.failure[0] == '\0' ? "No readable words" : context.failure;
-    indexWriter.discard();
+        dataContext.failure[0] == '\0' ? "No readable words"
+                                        : dataContext.failure;
     dataWriter.discard();
-    indexFile.close();
     dataFile.close();
     source.close();
-    SD_MMC.remove(tmpIndexPath);
     SD_MMC.remove(tmpDataPath);
     metadata.clear();
     notifyStatus("Index failed", label.c_str(), detail, 100);
@@ -2772,13 +2755,14 @@ bool StorageManager::buildIndexedBook(const String &path,
     metadata.title = normalizeDisplayText(displayNameWithoutExtension(path));
   }
 
+  IndexedBookStore::Header header;
   header.magic = IndexedBookStore::kMagic;
   header.version = IndexedBookStore::kVersion;
   header.headerSize = sizeof(IndexedBookStore::Header);
   header.recordSize = sizeof(IndexedBookStore::WordRecord);
   header.sourceSize = static_cast<uint32_t>(sourceBytes);
   header.sourceFingerprint = fingerprint;
-  header.wordCount = context.wordCount;
+  header.wordCount = dataContext.wordCount;
   header.paragraphCount =
       static_cast<uint32_t>(metadata.paragraphStarts.size());
   header.chapterCount = static_cast<uint32_t>(metadata.chapters.size());
@@ -2788,9 +2772,75 @@ bool StorageManager::buildIndexedBook(const String &path,
       header.wordCount * sizeof(IndexedBookStore::WordRecord);
   header.chaptersOffset =
       header.paragraphsOffset + header.paragraphCount * sizeof(uint32_t);
-  header.dataSize = context.dataSize;
+  header.dataSize = dataContext.dataSize;
 
-  if (!dataWriter.flush() || !indexWriter.seek(header.paragraphsOffset)) {
+  if (!dataWriter.flush()) {
+    parseFailed = true;
+  }
+  dataWriter.discard();  // prevent destructor from flushing closed file
+  dataFile.close();
+  source.close();
+
+  if (parseFailed) {
+    SD_MMC.remove(tmpDataPath);
+    metadata.clear();
+    notifyStatus("Index failed", label.c_str(), "SD write failed", 100);
+    return false;
+  }
+
+  source = SD_MMC.open(path, FILE_READ);
+  if (!source || source.isDirectory()) {
+    if (source) {
+      source.close();
+    }
+    SD_MMC.remove(tmpDataPath);
+    metadata.clear();
+    Serial.printf("[storage-index] cannot reopen source for index: %s\n",
+                  path.c_str());
+    notifyStatus("Index failed", label.c_str(), "Source read failed", 100);
+    return false;
+  }
+
+  errno = 0;
+  File indexFile = SD_MMC.open(tmpIndexPath, FILE_WRITE);
+  const int indexOpenErrno = errno;
+  if (!indexFile) {
+    logFsErrno("storage-index", "open index FILE_WRITE", tmpIndexPath,
+               indexOpenErrno);
+    source.close();
+    SD_MMC.remove(tmpDataPath);
+    notifyStatus("Index failed", label.c_str(), "SD write failed", 100);
+    return false;
+  }
+
+  BufferedWriter indexWriter(indexFile);
+  if (!indexWriter.write(&header, sizeof(header))) {
+    indexWriter.discard();
+    indexFile.close();
+    source.close();
+    SD_MMC.remove(tmpIndexPath);
+    SD_MMC.remove(tmpDataPath);
+    notifyStatus("Index failed", label.c_str(), "SD write failed", 100);
+    return false;
+  }
+
+  IndexedBuildContext indexContext;
+  indexContext.indexWriter = &indexWriter;
+  ParseStats indexStats;
+  parseFailed = !parseIndexedSource(source, indexContext, indexStats, false);
+
+  if (!parseFailed && (indexContext.wordCount != header.wordCount ||
+                       indexContext.dataSize != header.dataSize)) {
+    Serial.printf("[storage-index] second pass mismatch words=%u/%u "
+                  "data=%u/%u\n",
+                  static_cast<unsigned int>(indexContext.wordCount),
+                  static_cast<unsigned int>(header.wordCount),
+                  static_cast<unsigned int>(indexContext.dataSize),
+                  static_cast<unsigned int>(header.dataSize));
+    parseFailed = true;
+  }
+
+  if (!parseFailed && !indexWriter.seek(header.paragraphsOffset)) {
     parseFailed = true;
   }
 
@@ -2818,17 +2868,15 @@ bool StorageManager::buildIndexedBook(const String &path,
 
   if (!parseFailed &&
       (!indexWriter.seek(0) || !indexWriter.write(&header, sizeof(header)) ||
-       !indexWriter.flush() || !dataWriter.flush())) {
+       !indexWriter.flush())) {
     parseFailed = true;
   }
 
+  indexWriter.discard();  // prevent destructor from flushing closed file
   indexFile.close();
-  dataFile.close();
   source.close();
 
   if (parseFailed) {
-    indexWriter.discard();
-    dataWriter.discard();
     SD_MMC.remove(tmpIndexPath);
     SD_MMC.remove(tmpDataPath);
     metadata.clear();
