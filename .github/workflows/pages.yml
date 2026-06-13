@@ -34,8 +34,8 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Build web converter
-        run: bash ./gradlew :conversionCore:publishWebConverterJs --no-daemon
+      - name: Check and build web converter
+        run: bash ./gradlew checkWeb --no-daemon
 
       - name: Download latest release firmware
         if: github.repository == 'ionutdecebal/rsvpnano'
