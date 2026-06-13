@@ -5,6 +5,7 @@ This board was added as a separate target on the `v0.0.5` multi-board integratio
 ## Target
 
 - PlatformIO env: `waveshare_esp32s3_touch_amoled_18`
+- USB MSC transfer is enabled in this env for Quick Settings `USB Sync`.
 - Board profile: `src/board/profiles/WaveshareEsp32S3TouchAmoled18Profile.h`
 - Display driver: `src/display/sh8601.cpp`
 
@@ -33,13 +34,23 @@ This board was added as a separate target on the `v0.0.5` multi-board integratio
 - The local Waveshare `12_LVGL_AXP2101_ADC_Data` demo also configures expander pin `4` as an input and reads it directly for the button action.
 - The `AXP2101` is still used for battery data and software shutdown, but it is no longer used as the runtime held-state source for the `1.8` PWR button.
 - Current `1.8` button model:
-  - `PWR` short: open/close menu
-  - `PWR` long: save state, show `OFF`, then enter recoverable soft-off
-  - `PWR + BOOT`: enter/exit standby screensaver
-  - `PWR` from soft-off: wake the app after a sustained confirmation window
-  - `BOOT` short: brightness
+  - firmware ignores runtime `PWR` reads because the expander-backed signal can false-trigger
+  - `BOOT` short: toggle reader play/pause, using the configured instant or sentence-end pause mode
+  - `BOOT` short in menus: back/close
+  - `BOOT` short in Wi-Fi Sync: exit sync
+  - `BOOT` triple press: start standby/screensaver
   - `BOOT` long: theme
-  - menu: downward swipe from the top edge
+  - `BOOT` from standby: wake the app after the short standby grace period
+  - swipe down from the top edge: open/close menu
+  - swipe up from the bottom edge: quick settings for brightness, theme, focus timer, and sync
+  - quick settings sync opens a Wi-Fi Sync / USB Sync chooser
+  - USB Sync exposes the SD card over USB MSC; eject from the host to remount and return to the reader
+  - main menu uses the new 1.8 test hierarchy: resume, chapters, books, articles, settings, power off
+  - articles contains back, browse articles, and update RSS
+  - settings contains display, word pacing, typography tune, Wi-Fi, firmware update, and SD card check
+  - Wi-Fi contains a nested network submenu for choose/forget network, plus Auto OTA and OTA Owner
+  - touch hold/double-tap playback gestures are disabled; `BOOT` owns reader play/pause
+  - `PWR` from soft-off: wake the app after a sustained confirmation window
 - The old BOOT/PWR swap experiment is no longer active on this board.
 - The `1.8` now uses recoverable soft-off for both USB and battery: the app saves state, blanks/sleeps the display, ends storage/touch, skips AXP2101 shutdown, and waits for `PWR`.
 - `PWR` soft-off wake currently requires a `500ms` confirmation window to reject short false pulses from the TCA9554-backed runtime input.
