@@ -33,12 +33,14 @@ class DisplayManager {
         : showBattery(true),
           showChapter(true),
           showProgress(true),
-          showPreviousSentenceHint(true) {}
+          showPreviousSentenceHint(true),
+          showEdgeMenuHints(false) {}
 
     bool showBattery;
     bool showChapter;
     bool showProgress;
     bool showPreviousSentenceHint;
+    bool showEdgeMenuHints;
   };
 
   struct LibraryItem {
@@ -65,7 +67,7 @@ class DisplayManager {
   void setDarkMode(bool darkMode);
   void setNightMode(bool nightMode);
   void setYellowMode(bool enabled);
-  void setUiOrientation(BoardConfig::UiOrientation orientation);
+  void setUiOrientation(Board::Config::UiOrientation orientation);
   void setUiRotated180(bool rotated180);
   void setTypographyConfig(const TypographyConfig &config);
   TypographyConfig typographyConfig() const;
@@ -174,6 +176,7 @@ class DisplayManager {
   void drawBatteryBadge(int logicalWidth, int logicalHeight);
   void drawBrightnessToastBadge(int logicalWidth, int logicalHeight);
   void drawPreviousSentenceHint();
+  void drawEdgeMenuHints(int logicalWidth, int logicalHeight, const ReaderChrome &chrome);
   void drawFooter(const String &chapterLabel, const String &statusLabel,
                   const ReaderChrome &chrome);
   void drawRsvpAnchorGuide(int anchorX, int textY, int textHeight);
@@ -200,7 +203,7 @@ class DisplayManager {
   bool darkMode_ = true;
   bool nightMode_ = false;
   bool yellowMode_ = false;
-  BoardConfig::UiOrientation uiOrientation_ = BoardConfig::DEFAULT_UI_ORIENTATION;
+  Board::Config::UiOrientation uiOrientation_ = Board::Config::DEFAULT_UI_ORIENTATION;
   bool tickerPlaybackFrameActive_ = false;
   String lastRenderKey_;
   String batteryLabel_;
