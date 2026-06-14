@@ -1,4 +1,4 @@
-#include "platforms/common/BoardEs8311Audio.h"
+#include "platforms/common/Es8311BoardAudio.h"
 
 #include <Wire.h>
 
@@ -8,25 +8,24 @@
 
 namespace {
 
-BoardDrivers::Es8311::Config es8311Config() {
-  BoardDrivers::Es8311::Config config;
-  config.wire = &Wire;
-  config.address = Board::Config::ES8311_ADDRESS;
-  config.mclkPin = Board::Config::PIN_AUDIO_MCLK;
-  config.bclkPin = Board::Config::PIN_AUDIO_BCLK;
-  config.wsPin = Board::Config::PIN_AUDIO_WS;
-  config.dataOutPin = Board::Config::PIN_AUDIO_DOUT;
-  return config;
-}
+const BoardDrivers::Es8311::Config kEs8311Config = {
+    &Wire,
+    Board::Config::ES8311_ADDRESS,
+    I2S_NUM_0,
+    Board::Config::PIN_AUDIO_MCLK,
+    Board::Config::PIN_AUDIO_BCLK,
+    Board::Config::PIN_AUDIO_WS,
+    Board::Config::PIN_AUDIO_DOUT,
+};
 
 }  // namespace
 
 namespace Board::Audio {
 
-bool begin() { return BoardPlatform::Es8311Audio::begin(es8311Config()); }
+bool begin() { return BoardPlatform::Es8311BoardAudio::begin(kEs8311Config); }
 
-bool beep() { return BoardPlatform::Es8311Audio::beep(); }
+bool beep() { return BoardPlatform::Es8311BoardAudio::beep(); }
 
-bool available() { return BoardPlatform::Es8311Audio::available(); }
+bool available() { return BoardPlatform::Es8311BoardAudio::available(); }
 
 }  // namespace Board::Audio

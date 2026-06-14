@@ -52,7 +52,7 @@ bool writeBeepBuffer() {
 
 }  // namespace
 
-namespace BoardPlatform::Es8311Audio {
+namespace BoardPlatform::Es8311BoardAudio {
 
 bool begin(const BoardDrivers::Es8311::Config &config) {
   if (BoardDrivers::Es8311::available()) {
@@ -89,4 +89,4 @@ bool beep() {
 
 bool available() { return BoardDrivers::Es8311::available(); }
 
-}  // namespace BoardPlatform::Es8311Audio
+}  // namespace BoardPlatform::Es8311BoardAudio
