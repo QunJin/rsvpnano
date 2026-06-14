@@ -38,16 +38,11 @@ constexpr float kSideAxisThreshold = 0.78f;
 constexpr float kCrossAxisLimit = 0.42f;
 constexpr float kFlatAxisThreshold = 0.84f;
 
-TwoWire &imuWire() { return BoardConfig::IMU_USES_WIRE1 ? Wire1 : Wire; }
+TwoWire &imuWire() { return Board::Config::IMU_USES_WIRE1 ? Wire1 : Wire; }
 
-const char *imuWireName() { return BoardConfig::IMU_USES_WIRE1 ? "Wire1" : "Wire"; }
+const char *imuWireName() { return Board::Config::IMU_USES_WIRE1 ? "Wire1" : "Wire"; }
 
-#if defined(RSVP_BOARD_WAVESHARE_ESP32S3_TOUCH_AMOLED_216) || \
-    defined(RSVP_BOARD_WAVESHARE_ESP32S3_TOUCH_AMOLED_18)
-constexpr bool kReleaseBusBeforeImuRead = true;
-#else
-constexpr bool kReleaseBusBeforeImuRead = false;
-#endif
+constexpr bool kReleaseBusBeforeImuRead = Board::Config::IMU_RELEASE_BUS_BEFORE_READ;
 
 }  // namespace
 
@@ -196,12 +191,12 @@ FocusTimer::State FocusTimer::state() const { return state_; }
 
 FocusTimer::Genre FocusTimer::genre() const { return genre_; }
 
-BoardConfig::UiOrientation FocusTimer::uiOrientation() const {
+Board::Config::UiOrientation FocusTimer::uiOrientation() const {
   switch (state_) {
     case State::GenreSelect:
     case State::Unavailable:
     case State::Complete:
-      return BoardConfig::UiOrientation::Landscape;
+      return Board::Config::UiOrientation::Landscape;
 
     case State::WaitForTouchStart:
     case State::TouchRunning:
@@ -215,10 +210,10 @@ BoardConfig::UiOrientation FocusTimer::uiOrientation() const {
 
     case State::BreakRunning:
     case State::WaitAfterWork:
-      return BoardConfig::UiOrientation::Landscape;
+      return Board::Config::UiOrientation::Landscape;
 
     default:
-      return BoardConfig::UiOrientation::Portrait;
+      return Board::Config::UiOrientation::Portrait;
   }
 }
 
@@ -309,7 +304,7 @@ const char *FocusTimer::genreLabel(Genre genre) {
 }
 
 bool FocusTimer::initImu() {
-  if (!BoardConfig::HAS_IMU) {
+  if (!Board::Config::HAS_IMU) {
     imuAvailable_ = false;
     Serial.println("[timer] IMU unavailable for this board profile");
     return false;
@@ -320,7 +315,7 @@ bool FocusTimer::initImu() {
   }
 
   const uint8_t candidateAddresses[] = {
-      BoardConfig::IMU_I2C_ADDRESS,
+      Board::Config::IMU_I2C_ADDRESS,
       0x6B,
       0x6A,
   };
@@ -403,10 +398,10 @@ bool FocusTimer::initImu() {
   imuAvailable_ = false;
   if (sawRespondingAddress) {
     Serial.printf("[timer] QMI8658 init failed bus=%s configured=0x%02X\n", imuWireName(),
-                  BoardConfig::IMU_I2C_ADDRESS);
+                  Board::Config::IMU_I2C_ADDRESS);
   } else {
     Serial.printf("[timer] QMI8658 not responding bus=%s configured=0x%02X fallback=0x6A\n",
-                  imuWireName(), BoardConfig::IMU_I2C_ADDRESS);
+                  imuWireName(), Board::Config::IMU_I2C_ADDRESS);
   }
   return false;
 }
@@ -657,8 +652,8 @@ FocusTimer::OrientationState FocusTimer::oppositeShortSide(
   }
 }
 
-BoardConfig::UiOrientation FocusTimer::portraitOrientationForShortSide(
+Board::Config::UiOrientation FocusTimer::portraitOrientationForShortSide(
     OrientationState orientation) {
-  return orientation == OrientationState::ShortSideB ? BoardConfig::UiOrientation::PortraitFlipped
-                                                     : BoardConfig::UiOrientation::Portrait;
+  return orientation == OrientationState::ShortSideB ? Board::Config::UiOrientation::PortraitFlipped
+                                                     : Board::Config::UiOrientation::Portrait;
 }

@@ -65,7 +65,7 @@ class DisplayManager {
   void setDarkMode(bool darkMode);
   void setNightMode(bool nightMode);
   void setYellowMode(bool enabled);
-  void setUiOrientation(BoardConfig::UiOrientation orientation);
+  void setUiOrientation(Board::Config::UiOrientation orientation);
   void setUiRotated180(bool rotated180);
   void setTypographyConfig(const TypographyConfig &config);
   TypographyConfig typographyConfig() const;
@@ -200,7 +200,7 @@ class DisplayManager {
   bool darkMode_ = true;
   bool nightMode_ = false;
   bool yellowMode_ = false;
-  BoardConfig::UiOrientation uiOrientation_ = BoardConfig::DEFAULT_UI_ORIENTATION;
+  Board::Config::UiOrientation uiOrientation_ = Board::Config::DEFAULT_UI_ORIENTATION;
   bool tickerPlaybackFrameActive_ = false;
   String lastRenderKey_;
   String batteryLabel_;

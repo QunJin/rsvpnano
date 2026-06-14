@@ -1,11 +1,10 @@
 #include "app/App.h"
 
-#include <esp_sleep.h>
-#include <esp_log.h>
 #include <WiFi.h>
 #include <algorithm>
 #include <climits>
 #include <cstdio>
+#include <esp_log.h>
 #include <iterator>
 #include <utility>
 #include <vector>
@@ -32,7 +31,7 @@ constexpr uint32_t kPowerOffReleaseWaitMs = 4000;
 constexpr uint32_t kSoftOffReleaseWaitMs = 1200;
 constexpr uint32_t kSoftOffWakePollMs = 15;
 constexpr uint32_t kSoftOffArmQuietMs = 250;
-constexpr uint32_t kSoftOffWakeConfirmMs = BoardConfig::SOFT_OFF_WAKE_CONFIRM_MS;
+constexpr uint32_t kSoftOffWakeConfirmMs = Board::Config::SOFT_OFF_WAKE_CONFIRM_MS;
 constexpr uint32_t kBatterySampleIntervalMs = 180000;
 constexpr uint32_t kTouchPlayHoldMs = 420;
 constexpr uint32_t kPreviewBrowseHoldMs = 240;
@@ -50,15 +49,15 @@ constexpr uint16_t kFooterMetricTapWidthPx = 220;
 constexpr uint16_t kFooterMetricTapHeightPx = 32;
 constexpr uint16_t kBatteryBadgeTapWidthPx = 160;
 constexpr uint16_t kBatteryBadgeTapHeightPx = 40;
-constexpr uint16_t kReaderChromeMarginXPx = BoardConfig::READER_CHROME_MARGIN_X;
-constexpr uint16_t kReaderChromeTopMarginPx = BoardConfig::READER_CHROME_MARGIN_TOP;
-constexpr uint16_t kReaderChromeBottomMarginPx = BoardConfig::READER_CHROME_MARGIN_BOTTOM;
-constexpr uint16_t kReaderBatteryMarginXPx = BoardConfig::READER_BATTERY_MARGIN_X;
-constexpr uint16_t kReaderBatteryTopMarginPx = BoardConfig::READER_BATTERY_MARGIN_TOP;
+constexpr uint16_t kReaderChromeMarginXPx = Board::Config::READER_CHROME_MARGIN_X;
+constexpr uint16_t kReaderChromeTopMarginPx = Board::Config::READER_CHROME_MARGIN_TOP;
+constexpr uint16_t kReaderChromeBottomMarginPx = Board::Config::READER_CHROME_MARGIN_BOTTOM;
+constexpr uint16_t kReaderBatteryMarginXPx = Board::Config::READER_BATTERY_MARGIN_X;
+constexpr uint16_t kReaderBatteryTopMarginPx = Board::Config::READER_BATTERY_MARGIN_TOP;
 constexpr uint16_t kMenuSwipeTopZonePx =
-    kReaderChromeTopMarginPx + (BoardConfig::ENABLE_TOP_EDGE_MENU_SWIPE ? 64 : 0);
+    kReaderChromeTopMarginPx + (Board::Config::ENABLE_TOP_EDGE_MENU_SWIPE ? 64 : 0);
 constexpr uint16_t kQuickSettingsSwipeBottomZonePx =
-    kReaderChromeBottomMarginPx + (BoardConfig::ENABLE_BOTTOM_EDGE_QUICK_SETTINGS_SWIPE ? 64 : 0);
+    kReaderChromeBottomMarginPx + (Board::Config::ENABLE_BOTTOM_EDGE_QUICK_SETTINGS_SWIPE ? 64 : 0);
 constexpr uint16_t kMenuSwipeTriggerPx = 72;
 constexpr uint16_t kScrubStepPx = 22;
 constexpr uint16_t kBrowseNeutralZonePx = 14;
@@ -92,8 +91,8 @@ constexpr uint8_t kBatteryCriticalConsecutiveSamples = 2;
 constexpr uint32_t kStandbyWakeGraceMs = 900;
 constexpr uint32_t kStandbyFrameMs = 160;
 constexpr uint16_t kStandbyLifeCellPixels = 2;
-constexpr uint16_t kStandbyLifeColumns = BoardConfig::DISPLAY_WIDTH / kStandbyLifeCellPixels;
-constexpr uint16_t kStandbyLifeRows = BoardConfig::DISPLAY_HEIGHT / kStandbyLifeCellPixels;
+constexpr uint16_t kStandbyLifeColumns = Board::Config::DISPLAY_WIDTH / kStandbyLifeCellPixels;
+constexpr uint16_t kStandbyLifeRows = Board::Config::DISPLAY_HEIGHT / kStandbyLifeCellPixels;
 constexpr uint32_t kChapterTransitionMs = 1400;
 constexpr uint8_t kBrightnessLevels[] = {40, 55, 70, 85, 100};
 constexpr uint8_t kNightBrightnessLevels[] = {35, 40, 45, 50, 55};
@@ -558,35 +557,35 @@ bool readActiveLowButton(int pin) {
 }
 
 bool readLogicalBootButtonHeld() {
-  if (BoardConfig::SWAP_APP_BOOT_AND_POWER_BUTTONS) {
-    return BoardConfig::readVirtualPowerButtonHeld();
+  if (Board::Config::SWAP_APP_BOOT_AND_POWER_BUTTONS) {
+    return Board::Buttons::readVirtualPowerHeld();
   }
 
-  if (BoardConfig::PIN_BOOT_BUTTON >= 0) {
-    return readActiveLowButton(BoardConfig::PIN_BOOT_BUTTON);
+  if (Board::Config::PIN_BOOT_BUTTON >= 0) {
+    return readActiveLowButton(Board::Config::PIN_BOOT_BUTTON);
   }
 
-  return BoardConfig::readVirtualBootButtonHeld();
+  return Board::Buttons::readVirtualBootHeld();
 }
 
 bool readLogicalPowerButtonHeld() {
-  if (BoardConfig::SWAP_APP_BOOT_AND_POWER_BUTTONS) {
-    return readActiveLowButton(BoardConfig::PIN_BOOT_BUTTON);
+  if (Board::Config::SWAP_APP_BOOT_AND_POWER_BUTTONS) {
+    return readActiveLowButton(Board::Config::PIN_BOOT_BUTTON);
   }
 
-  if (BoardConfig::PIN_PWR_BUTTON >= 0) {
-    return readActiveLowButton(BoardConfig::PIN_PWR_BUTTON);
+  if (Board::Config::PIN_PWR_BUTTON >= 0) {
+    return readActiveLowButton(Board::Config::PIN_PWR_BUTTON);
   }
 
-  return BoardConfig::readVirtualPowerButtonHeld();
+  return Board::Buttons::readVirtualPowerHeld();
 }
 
 bool readFirmwarePowerButtonHeld() {
-  return BoardConfig::FIRMWARE_POWER_BUTTON_ENABLED ? readLogicalPowerButtonHeld() : false;
+  return Board::Config::FIRMWARE_POWER_BUTTON_ENABLED ? readLogicalPowerButtonHeld() : false;
 }
 
 bool logicalPowerButtonUsesVirtualState() {
-  return !BoardConfig::SWAP_APP_BOOT_AND_POWER_BUTTONS && BoardConfig::PIN_PWR_BUTTON < 0;
+  return !Board::Config::SWAP_APP_BOOT_AND_POWER_BUTTONS && Board::Config::PIN_PWR_BUTTON < 0;
 }
 
 enum class SoftOffWakeSource : uint8_t {
@@ -680,30 +679,30 @@ SoftOffWakeSource waitForRecoverableSoftOffWake(bool allowPowerWake, bool allowB
 }  // namespace
 
 App::App()
-    : button_(BoardConfig::PIN_BOOT_BUTTON),
-      powerButton_(BoardConfig::PIN_PWR_BUTTON),
-      keyButton_(BoardConfig::PIN_KEY_BUTTON) {}
+    : button_(Board::Config::PIN_BOOT_BUTTON),
+      powerButton_(Board::Config::PIN_PWR_BUTTON),
+      keyButton_(Board::Config::PIN_KEY_BUTTON) {}
 
 void App::begin() {
-  BoardConfig::begin();
+  Board::System::begin();
   button_.beginWithState(readLogicalBootButtonHeld());
   powerButton_.beginWithState(readFirmwarePowerButtonHeld());
-  if (BoardConfig::FIRMWARE_POWER_BUTTON_ENABLED &&
-      (BoardConfig::PIN_PWR_BUTTON < 0 || BoardConfig::SWAP_APP_BOOT_AND_POWER_BUTTONS)) {
-    BoardConfig::consumeVirtualPowerButtonShortPressEvent();
-    BoardConfig::consumeVirtualPowerButtonLongPressEvent();
+  if (Board::Config::FIRMWARE_POWER_BUTTON_ENABLED &&
+      (Board::Config::PIN_PWR_BUTTON < 0 || Board::Config::SWAP_APP_BOOT_AND_POWER_BUTTONS)) {
+    Board::Buttons::consumeVirtualPowerShortPress();
+    Board::Buttons::consumeVirtualPowerLongPress();
   }
   keyButton_.begin();
   bootButtonReleasedSinceBoot_ = !button_.isHeld();
   bootButtonLongPressHandled_ = false;
   clearBootButtonTapSequence();
   powerButtonReleasedSinceBoot_ =
-      !BoardConfig::FIRMWARE_POWER_BUTTON_ENABLED
+      !Board::Config::FIRMWARE_POWER_BUTTON_ENABLED
           ? true
           : (logicalPowerButtonUsesVirtualState() ? false : !powerButton_.isHeld());
   powerButtonLongPressHandled_ = false;
-  powerButtonEventArmMs_ = BoardConfig::APP_POWER_BUTTON_USES_PMU_EVENTS
-                               ? millis() + BoardConfig::PMU_BOOT_BUTTON_IGNORE_MS
+  powerButtonEventArmMs_ = Board::Buttons::usesPowerEvents()
+                               ? millis() + Board::Buttons::powerEventIgnoreMs()
                                : 0;
   keyButtonReleasedSinceBoot_ = !keyButton_.isHeld();
   keyButtonLongPressHandled_ = false;
@@ -794,6 +793,7 @@ void App::begin() {
       pauseMode_ = PauseMode::SentenceEnd;
       break;
   }
+  standbyTimerIndex_ = preferences_.getUChar(kPrefStandbyTimer, 0);
   pacingLongWordDelayMs_ =
       loadPacingDelayMs(preferences_, kPrefPacingLongMs, kPrefLegacyPacingLong);
   pacingComplexWordDelayMs_ =
@@ -843,8 +843,8 @@ void App::begin() {
     Serial.println("[app] Display init failed");
   }
 
-  touchInitialized_ = touch_.begin();
-  audio_.begin();
+  touchInitialized_ = Input::Touch::begin();
+  Board::Audio::begin();
   focusTimer_.begin();
 
 #if RSVP_USB_TRANSFER_ENABLED && RSVP_USB_TRANSFER_AUTO_START
@@ -959,6 +959,24 @@ void App::update(uint32_t nowMs) {
     ESP_LOGI(kAppTag, "state=%s", stateName(state_));
     Serial.printf("[app] state=%s ms=%lu\n", stateName(state_),
                   static_cast<unsigned long>(nowMs));
+  }
+
+  bool isIdle = (state_ == AppState::Paused || state_ == AppState::Menu);
+  if (state_ == AppState::Menu && menuScreen_ == MenuScreen::FocusTimerSession) {
+    isIdle = false;
+  }
+  if (otaCheckInProgress_) {
+    isIdle = false;
+  }
+
+  if (isIdle) {
+    const uint32_t timeoutMs = standbyTimerMs();
+    if (timeoutMs > 0 && nowMs - lastActivityMs_ >= timeoutMs) {
+      Serial.println("[app] standby idle timeout reached");
+      enterStandby(nowMs);
+    }
+  } else if (state_ != AppState::Standby && state_ != AppState::Sleeping) {
+    lastActivityMs_ = nowMs;
   }
 }
 
@@ -1184,8 +1202,8 @@ void App::maybeSaveReadingPosition(uint32_t nowMs) {
 }
 
 bool App::handleStandbyCombo(uint32_t nowMs) {
-  if (!BoardConfig::ENABLE_STANDBY_BUTTON_COMBO ||
-      !BoardConfig::FIRMWARE_POWER_BUTTON_ENABLED) {
+  if (!Board::Config::ENABLE_STANDBY_BUTTON_COMBO ||
+      !Board::Config::FIRMWARE_POWER_BUTTON_ENABLED) {
     return false;
   }
 
@@ -1253,7 +1271,7 @@ void App::clearBootButtonTapSequence() {
 }
 
 void App::registerBootButtonTap(uint32_t nowMs) {
-  if (!BoardConfig::BOOT_BUTTON_TRIPLE_STARTS_STANDBY) {
+  if (!Board::Config::BOOT_BUTTON_TRIPLE_STARTS_STANDBY) {
     executeBootButtonSingleTap(nowMs);
     return;
   }
@@ -1287,7 +1305,7 @@ void App::processPendingBootButtonTap(uint32_t nowMs) {
 }
 
 void App::executeBootButtonSingleTap(uint32_t nowMs) {
-  if (state_ == AppState::Menu && BoardConfig::BOOT_BUTTON_BACKS_OUT_OF_MENU) {
+  if (state_ == AppState::Menu && Board::Config::BOOT_BUTTON_BACKS_OUT_OF_MENU) {
     if (menuScreen_ == MenuScreen::Main || menuScreen_ == MenuScreen::QuickSettings) {
       setState(AppState::Paused, nowMs);
     } else if (menuScreen_ == MenuScreen::PowerOffConfirm) {
@@ -1295,17 +1313,17 @@ void App::executeBootButtonSingleTap(uint32_t nowMs) {
     } else if (menuScreen_ == MenuScreen::QuickSync) {
       menuScreen_ = MenuScreen::QuickSettings;
       renderQuickSettings();
-    } else if (BoardConfig::ENABLE_RESTRUCTURED_MENU && menuScreen_ == MenuScreen::Articles) {
+    } else if (Board::Config::ENABLE_RESTRUCTURED_MENU && menuScreen_ == MenuScreen::Articles) {
       menuScreen_ = MenuScreen::Main;
       renderMainMenu();
-    } else if (BoardConfig::ENABLE_RESTRUCTURED_MENU &&
+    } else if (Board::Config::ENABLE_RESTRUCTURED_MENU &&
                menuScreen_ == MenuScreen::SettingsHome) {
       menuScreen_ = MenuScreen::Main;
       renderMainMenu();
-    } else if (BoardConfig::ENABLE_RESTRUCTURED_MENU &&
+    } else if (Board::Config::ENABLE_RESTRUCTURED_MENU &&
                menuScreen_ == MenuScreen::WifiNetworkSettings) {
       openWifiSettings();
-    } else if (BoardConfig::ENABLE_RESTRUCTURED_MENU &&
+    } else if (Board::Config::ENABLE_RESTRUCTURED_MENU &&
                (menuScreen_ == MenuScreen::SettingsDisplay ||
                 menuScreen_ == MenuScreen::SettingsPacing ||
                 menuScreen_ == MenuScreen::WifiSettings ||
@@ -1329,7 +1347,7 @@ void App::executeBootButtonSingleTap(uint32_t nowMs) {
     return;
   }
 
-  if (BoardConfig::BOOT_BUTTON_TOGGLES_READER &&
+  if (Board::Config::BOOT_BUTTON_TOGGLES_READER &&
       (state_ == AppState::Paused || state_ == AppState::Playing)) {
     toggleReaderPlaybackFromShortcut(nowMs);
     return;
@@ -1340,7 +1358,7 @@ void App::executeBootButtonSingleTap(uint32_t nowMs) {
 
 void App::handleBootButton(uint32_t nowMs) {
   if (state_ == AppState::Standby) {
-    if (!BoardConfig::BOOT_BUTTON_WAKES_STANDBY) {
+    if (!Board::Config::BOOT_BUTTON_WAKES_STANDBY) {
       clearBootButtonTapSequence();
       return;
     }
@@ -1372,7 +1390,7 @@ void App::handleBootButton(uint32_t nowMs) {
 
   if (state_ == AppState::CompanionSync) {
     clearBootButtonTapSequence();
-    if (!BoardConfig::BOOT_BUTTON_BACKS_OUT_OF_MENU || !button_.wasReleasedEvent()) {
+    if (!Board::Config::BOOT_BUTTON_BACKS_OUT_OF_MENU || !button_.wasReleasedEvent()) {
       return;
     }
     if (button_.lastHoldDurationMs() < kThemeToggleHoldMs) {
@@ -1388,7 +1406,7 @@ void App::handleBootButton(uint32_t nowMs) {
       button_.heldDurationMs(nowMs) >= kThemeToggleHoldMs) {
     clearBootButtonTapSequence();
     bootButtonLongPressHandled_ = true;
-    if (BoardConfig::BOOT_BUTTON_HOLD_STARTS_STANDBY) {
+    if (Board::Config::BOOT_BUTTON_HOLD_STARTS_STANDBY) {
       Serial.println("[button] BOOT hold -> standby");
       enterStandby(nowMs);
     } else {
@@ -1408,9 +1426,9 @@ void App::handleBootButton(uint32_t nowMs) {
   }
 
   if (button_.lastHoldDurationMs() < kThemeToggleHoldMs) {
-    if (BoardConfig::BOOT_BUTTON_TOGGLES_READER ||
-        BoardConfig::BOOT_BUTTON_BACKS_OUT_OF_MENU ||
-        BoardConfig::BOOT_BUTTON_TRIPLE_STARTS_STANDBY) {
+    if (Board::Config::BOOT_BUTTON_TOGGLES_READER ||
+        Board::Config::BOOT_BUTTON_BACKS_OUT_OF_MENU ||
+        Board::Config::BOOT_BUTTON_TRIPLE_STARTS_STANDBY) {
       registerBootButtonTap(nowMs);
     } else {
       cycleBrightness(nowMs);
@@ -1419,23 +1437,23 @@ void App::handleBootButton(uint32_t nowMs) {
 }
 
 void App::handlePowerButton(uint32_t nowMs) {
-  if (!BoardConfig::FIRMWARE_POWER_BUTTON_ENABLED) {
+  if (!Board::Config::FIRMWARE_POWER_BUTTON_ENABLED) {
     return;
   }
 
-  if (BoardConfig::APP_POWER_BUTTON_USES_PMU_EVENTS && nowMs < powerButtonEventArmMs_) {
-    const bool ignoredShort = BoardConfig::consumeVirtualPowerButtonShortPressEvent();
-    const bool ignoredLong = BoardConfig::consumeVirtualPowerButtonLongPressEvent();
+  if (Board::Buttons::usesPowerEvents() && nowMs < powerButtonEventArmMs_) {
+    const bool ignoredShort = Board::Buttons::consumeVirtualPowerShortPress();
+    const bool ignoredLong = Board::Buttons::consumeVirtualPowerLongPress();
     if (ignoredShort || ignoredLong || powerButton_.isHeld()) {
-      powerButtonEventArmMs_ = nowMs + BoardConfig::PMU_BOOT_BUTTON_IGNORE_MS;
+      powerButtonEventArmMs_ = nowMs + Board::Buttons::powerEventIgnoreMs();
     }
     return;
   }
 
   if (!powerButtonReleasedSinceBoot_) {
     if (logicalPowerButtonUsesVirtualState()) {
-      BoardConfig::consumeVirtualPowerButtonShortPressEvent();
-      BoardConfig::consumeVirtualPowerButtonLongPressEvent();
+      Board::Buttons::consumeVirtualPowerShortPress();
+      Board::Buttons::consumeVirtualPowerLongPress();
     }
     if (!powerButton_.isHeld()) {
       powerButtonReleasedSinceBoot_ = true;
@@ -1443,7 +1461,7 @@ void App::handlePowerButton(uint32_t nowMs) {
     return;
   }
 
-  if (BoardConfig::APP_POWER_BUTTON_USES_PMU_EVENTS) {
+  if (Board::Buttons::usesPowerEvents()) {
     if (state_ == AppState::UsbTransfer || state_ == AppState::CompanionSync || powerOffStarted_) {
       return;
     }
@@ -1454,7 +1472,7 @@ void App::handlePowerButton(uint32_t nowMs) {
 
     if (powerButton_.isHeld() && powerButton_.heldDurationMs(nowMs) >= kPowerOffHoldMs) {
       powerButtonLongPressHandled_ = true;
-      if (BoardConfig::SUPPORTS_SOFTWARE_POWEROFF) {
+      if (Board::Config::SUPPORTS_SOFTWARE_POWEROFF) {
         openPowerOffConfirm(nowMs);
       } else {
         enterStandby(nowMs);
@@ -1499,9 +1517,9 @@ void App::handlePowerButton(uint32_t nowMs) {
     return;
   }
 
-  if (logicalPowerButtonUsesVirtualState() && BoardConfig::consumeVirtualPowerButtonLongPressEvent()) {
+  if (logicalPowerButtonUsesVirtualState() && Board::Buttons::consumeVirtualPowerLongPress()) {
     powerButtonLongPressHandled_ = true;
-    if (BoardConfig::SUPPORTS_SOFTWARE_POWEROFF) {
+    if (Board::Config::SUPPORTS_SOFTWARE_POWEROFF) {
       openPowerOffConfirm(nowMs);
     } else {
       enterStandby(nowMs);
@@ -1524,7 +1542,7 @@ void App::handlePowerButton(uint32_t nowMs) {
 
   if (powerButton_.isHeld() && nowMs - powerButton_.lastEdgeMs() >= kPowerOffHoldMs) {
     powerButtonLongPressHandled_ = true;
-    if (BoardConfig::SUPPORTS_SOFTWARE_POWEROFF) {
+    if (Board::Config::SUPPORTS_SOFTWARE_POWEROFF) {
       openPowerOffConfirm(nowMs);
     } else {
       enterStandby(nowMs);
@@ -1541,7 +1559,7 @@ void App::handlePowerButton(uint32_t nowMs) {
     return;
   }
 
-  if (BoardConfig::POWER_BUTTON_SHORT_TOGGLES_STANDBY) {
+  if (Board::Config::POWER_BUTTON_SHORT_TOGGLES_STANDBY) {
     if (state_ != AppState::Booting && state_ != AppState::Sleeping) {
       enterStandby(nowMs);
     }
@@ -1971,8 +1989,8 @@ bool App::updateBatteryStatus(uint32_t nowMs, bool force) {
 
   lastBatterySampleMs_ = nowMs;
 
-  BoardConfig::BatteryStatus status;
-  if (BoardConfig::readBatteryStatus(status)) {
+  Board::Config::BatteryStatus status;
+  if (Board::Power::readBatteryStatus(status)) {
     batteryPresent_ = true;
     if (!batterySampleInitialized_) {
       batteryFilteredVoltage_ = status.voltage;
@@ -2145,12 +2163,12 @@ void App::updateBrightnessToast(uint32_t nowMs) {
 void App::resetReaderTapTracking() { lastReaderTapValid_ = false; }
 
 bool App::isFooterMetricTap(uint16_t x, uint16_t y) const {
-  return x >= BoardConfig::DISPLAY_WIDTH - kReaderChromeMarginXPx - kFooterMetricTapWidthPx &&
-         y >= BoardConfig::DISPLAY_HEIGHT - kReaderChromeBottomMarginPx - kFooterMetricTapHeightPx;
+  return x >= Board::Config::DISPLAY_WIDTH - kReaderChromeMarginXPx - kFooterMetricTapWidthPx &&
+         y >= Board::Config::DISPLAY_HEIGHT - kReaderChromeBottomMarginPx - kFooterMetricTapHeightPx;
 }
 
 bool App::isBatteryBadgeTap(uint16_t x, uint16_t y) const {
-  return x >= BoardConfig::DISPLAY_WIDTH - kReaderBatteryMarginXPx - kBatteryBadgeTapWidthPx &&
+  return x >= Board::Config::DISPLAY_WIDTH - kReaderBatteryMarginXPx - kBatteryBadgeTapWidthPx &&
          y <= kReaderBatteryTopMarginPx + kBatteryBadgeTapHeightPx;
 }
 
@@ -2375,7 +2393,7 @@ void App::handleTouch(uint32_t nowMs) {
   if (state_ == AppState::Booting || state_ == AppState::UsbTransfer ||
       state_ == AppState::Standby ||
       state_ == AppState::Sleeping) {
-    touch_.cancel();
+    Input::Touch::cancel();
     pausedTouch_.active = false;
     pausedTouchIntent_ = TouchIntent::None;
     touchPlayHeld_ = false;
@@ -2384,7 +2402,7 @@ void App::handleTouch(uint32_t nowMs) {
   }
 
   TouchEvent ev;
-  if (!touch_.poll(ev)) {
+  if (!Input::Touch::readEvent(ev)) {
     return;
   }
   lastActivityMs_ = nowMs;
@@ -2458,7 +2476,7 @@ void App::applyPausedTouchGesture(const TouchEvent &event, uint32_t nowMs) {
   }
 
   if (state_ == AppState::Playing) {
-    if (BoardConfig::TOUCH_READER_PLAYBACK_ENABLED && tapLike &&
+    if (Board::Config::TOUCH_READER_PLAYBACK_ENABLED && tapLike &&
         pressDurationMs >= kTouchPlayHoldMs) {
       resetReaderTapTracking();
       pausedTouch_.active = false;
@@ -2481,12 +2499,12 @@ void App::applyPausedTouchGesture(const TouchEvent &event, uint32_t nowMs) {
         if (handlePreviousSentenceTap(event.x, event.y, nowMs)) {
           return;
         }
-        if (BoardConfig::TOUCH_READER_PLAYBACK_ENABLED &&
-            BoardConfig::READER_SINGLE_TAP_PAUSES_WHILE_LOCKED &&
+        if (Board::Config::TOUCH_READER_PLAYBACK_ENABLED &&
+            Board::Config::READER_SINGLE_TAP_PAUSES_WHILE_LOCKED &&
             (playLocked_ || pauseAtSentenceEndRequested_)) {
           resetReaderTapTracking();
           requestReaderPauseAtSentenceEnd(nowMs);
-        } else if (BoardConfig::TOUCH_READER_PLAYBACK_ENABLED) {
+        } else if (Board::Config::TOUCH_READER_PLAYBACK_ENABLED) {
           handleReaderTap(event.x, event.y, nowMs);
         } else {
           resetReaderTapTracking();
@@ -2498,7 +2516,7 @@ void App::applyPausedTouchGesture(const TouchEvent &event, uint32_t nowMs) {
     return;
   }
 
-  if (BoardConfig::TOUCH_READER_PLAYBACK_ENABLED && !previewBrowseMode && !ended &&
+  if (Board::Config::TOUCH_READER_PLAYBACK_ENABLED && !previewBrowseMode && !ended &&
       pausedTouchIntent_ == TouchIntent::None &&
       pressDurationMs >= kTouchPlayHoldMs && tapLike) {
     resetReaderTapTracking();
@@ -2577,7 +2595,7 @@ void App::applyPausedTouchGesture(const TouchEvent &event, uint32_t nowMs) {
       resetReaderTapTracking();
       contextViewVisible_ = false;
       renderActiveReader(nowMs);
-    } else if (tapLike && BoardConfig::TOUCH_READER_PLAYBACK_ENABLED) {
+    } else if (tapLike && Board::Config::TOUCH_READER_PLAYBACK_ENABLED) {
       handleReaderTap(event.x, event.y, nowMs);
     } else {
       resetReaderTapTracking();
@@ -2587,7 +2605,7 @@ void App::applyPausedTouchGesture(const TouchEvent &event, uint32_t nowMs) {
 
 bool App::handleTopEdgeMenuSwipe(const TouchEvent &event, uint32_t nowMs, int deltaX, int deltaY,
                                  bool ended) {
-  if (!BoardConfig::ENABLE_TOP_EDGE_MENU_SWIPE || !ended || state_ == AppState::Menu ||
+  if (!Board::Config::ENABLE_TOP_EDGE_MENU_SWIPE || !ended || state_ == AppState::Menu ||
       state_ == AppState::Standby || state_ == AppState::Sleeping) {
     return false;
   }
@@ -2613,7 +2631,7 @@ bool App::handleTopEdgeMenuSwipe(const TouchEvent &event, uint32_t nowMs, int de
 
 bool App::handleBottomEdgeQuickSettingsSwipe(const TouchEvent &event, uint32_t nowMs, int deltaX,
                                              int deltaY, bool ended) {
-  if (!BoardConfig::ENABLE_BOTTOM_EDGE_QUICK_SETTINGS_SWIPE || !ended ||
+  if (!Board::Config::ENABLE_BOTTOM_EDGE_QUICK_SETTINGS_SWIPE || !ended ||
       state_ == AppState::Menu || state_ == AppState::Standby || state_ == AppState::Sleeping) {
     return false;
   }
@@ -2622,7 +2640,7 @@ bool App::handleBottomEdgeQuickSettingsSwipe(const TouchEvent &event, uint32_t n
   const int absDeltaY = abs(deltaY);
   const bool startsNearBottom =
       pausedTouch_.startY >=
-      static_cast<uint16_t>(BoardConfig::DISPLAY_HEIGHT - kQuickSettingsSwipeBottomZonePx);
+      static_cast<uint16_t>(Board::Config::DISPLAY_HEIGHT - kQuickSettingsSwipeBottomZonePx);
   const bool verticalUpSwipe =
       deltaY <= -static_cast<int>(kMenuSwipeTriggerPx) &&
       absDeltaY > absDeltaX + static_cast<int>(kAxisBiasPx);
@@ -2669,7 +2687,7 @@ void App::applyScrubTarget(int targetSteps, uint32_t nowMs) {
 }
 
 int App::browseScrollRatePermille(uint16_t y) const {
-  const int centerY = BoardConfig::DISPLAY_HEIGHT / 2;
+  const int centerY = Board::Config::DISPLAY_HEIGHT / 2;
   const int signedDistance = static_cast<int>(y) - centerY;
   const int absDistance = abs(signedDistance);
   if (absDistance <= static_cast<int>(kBrowseNeutralZonePx)) {
@@ -2997,7 +3015,7 @@ bool App::moveMenuSelection(int direction, bool wrap) {
   }
 
   size_t *selectedIndex = &menuSelectedIndex_;
-  size_t itemCount = BoardConfig::ENABLE_RESTRUCTURED_MENU
+  size_t itemCount = Board::Config::ENABLE_RESTRUCTURED_MENU
                          ? static_cast<size_t>(RestructuredMenuItemCount)
                          : static_cast<size_t>(MenuItemCount);
   if (isSettingsMenuScreen(menuScreen_)) {
@@ -3130,7 +3148,7 @@ bool App::moveMenuSelection(int direction, bool wrap) {
                   focusTimerGenreMenuItems_[focusTimerGenreSelectedIndex_].c_str());
   } else {
     String selectedLabel = uiText(UiText::Resume);
-    if (BoardConfig::ENABLE_RESTRUCTURED_MENU) {
+    if (Board::Config::ENABLE_RESTRUCTURED_MENU) {
       switch (menuSelectedIndex_) {
         case RestructuredMenuResume:
           selectedLabel = uiText(UiText::Resume);
@@ -3257,7 +3275,7 @@ void App::selectMenuItem(uint32_t nowMs) {
     return;
   }
 
-  if (BoardConfig::ENABLE_RESTRUCTURED_MENU) {
+  if (Board::Config::ENABLE_RESTRUCTURED_MENU) {
     switch (menuSelectedIndex_) {
       case RestructuredMenuResume:
         setState(AppState::Paused, nowMs);
@@ -3385,7 +3403,7 @@ void App::selectQuickSyncItem(uint32_t nowMs) {
 }
 
 void App::openSettings() {
-  settingsSelectedIndex_ = BoardConfig::ENABLE_RESTRUCTURED_MENU
+  settingsSelectedIndex_ = Board::Config::ENABLE_RESTRUCTURED_MENU
                                ? kSettingsHomeRestructuredDisplayIndex
                                : kSettingsHomeDisplayIndex;
   menuScreen_ = MenuScreen::SettingsHome;
@@ -3405,7 +3423,7 @@ void App::selectSettingsItem(uint32_t nowMs) {
     return;
   }
 
-  if (BoardConfig::ENABLE_RESTRUCTURED_MENU) {
+  if (Board::Config::ENABLE_RESTRUCTURED_MENU) {
     selectRestructuredSettingsItem(nowMs);
     return;
   }
@@ -3897,7 +3915,7 @@ void App::selectRestructuredSettingsItem(uint32_t nowMs) {
 }
 
 void App::openWifiSettings() {
-  if (BoardConfig::ENABLE_RESTRUCTURED_MENU) {
+  if (Board::Config::ENABLE_RESTRUCTURED_MENU) {
     settingsSelectedIndex_ = configuredWifiSsid().isEmpty()
                                  ? kWifiSettingsRestructuredNetworkIndex
                                  : kWifiSettingsRestructuredAutoUpdateIndex;
@@ -4102,12 +4120,12 @@ void App::rebuildTextEntryButtons() {
     }
 
     const int availableWidth =
-        BoardConfig::DISPLAY_WIDTH - (2 * kKeyboardMarginX) -
+        Board::Config::DISPLAY_WIDTH - (2 * kKeyboardMarginX) -
         static_cast<int>((keyCount - 1) * kKeyboardRowGap);
     const int keyWidth = std::max(28, availableWidth / static_cast<int>(keyCount));
     const int totalWidth =
         keyWidth * static_cast<int>(keyCount) + static_cast<int>((keyCount - 1) * kKeyboardRowGap);
-    int x = std::max(0, (BoardConfig::DISPLAY_WIDTH - totalWidth) / 2);
+    int x = std::max(0, (Board::Config::DISPLAY_WIDTH - totalWidth) / 2);
     const int y = kKeyboardTopY + static_cast<int>(rowIndex * rowPitch);
 
     for (size_t charIndex = 0; charIndex < keyCount; ++charIndex) {
@@ -4156,7 +4174,7 @@ void App::rebuildTextEntryButtons() {
 
   const size_t controlCount = sizeof(controls) / sizeof(controls[0]);
   const int totalGapWidth = static_cast<int>((controlCount - 1) * kKeyboardRowGap);
-  const int availableWidth = BoardConfig::DISPLAY_WIDTH - (2 * kKeyboardMarginX) - totalGapWidth;
+  const int availableWidth = Board::Config::DISPLAY_WIDTH - (2 * kKeyboardMarginX) - totalGapWidth;
   int remainingWidth = availableWidth;
   uint16_t x = kKeyboardMarginX;
   const uint16_t y = kKeyboardTopY + static_cast<uint16_t>(3 * rowPitch);
@@ -4424,7 +4442,7 @@ void App::cycleTypographyPreviewSample(int direction) {
 void App::rebuildSettingsMenuItems() {
   settingsMenuItems_.clear();
   settingsMenuItems_.reserve(SettingsItemCount);
-  if (BoardConfig::ENABLE_RESTRUCTURED_MENU) {
+  if (Board::Config::ENABLE_RESTRUCTURED_MENU) {
     if (menuScreen_ == MenuScreen::SettingsHome) {
       settingsMenuItems_.push_back(uiText(UiText::Back));
       settingsMenuItems_.push_back(uiText(UiText::Display));
@@ -5019,7 +5037,7 @@ void App::openBookPicker(bool articlesOnly) {
 
 void App::selectBookPickerItem(uint32_t nowMs) {
   if (bookPickerSelectedIndex_ == kBookPickerBackIndex || bookMenuItems_.size() <= 1) {
-    if (BoardConfig::ENABLE_RESTRUCTURED_MENU && bookPickerArticlesOnly_) {
+    if (Board::Config::ENABLE_RESTRUCTURED_MENU && bookPickerArticlesOnly_) {
       menuScreen_ = MenuScreen::Articles;
       renderArticlesMenu();
       return;
@@ -5302,7 +5320,7 @@ void App::runSdCardCheck(uint32_t nowMs) {
   display_.renderStatus("SD check", result.summary, detail);
   delay(2600);
 
-  if (BoardConfig::ENABLE_RESTRUCTURED_MENU && menuScreen_ == MenuScreen::SettingsHome) {
+  if (Board::Config::ENABLE_RESTRUCTURED_MENU && menuScreen_ == MenuScreen::SettingsHome) {
     settingsSelectedIndex_ = kSettingsHomeRestructuredSdCardIndex;
     rebuildSettingsMenuItems();
     renderSettings();
@@ -5358,9 +5376,13 @@ void App::enterUsbTransfer(uint32_t nowMs) {
     storageReady_ = storage_.begin();
     if (storageReady_ && usingStorageBook_ && !currentBookPath_.isEmpty()) {
       const int refreshedBookIndex = findBookIndexByPath(currentBookPath_);
+      BookOpenOptions reloadOptions;
+      reloadOptions.allowIndexBuild = false;
+      reloadOptions.allowEpubConversion = false;
+      reloadOptions.rebuildTimeEstimate = false;
       if (refreshedBookIndex >= 0 &&
-          loadBookAtIndex(static_cast<size_t>(refreshedBookIndex), nowMs, false, false, false,
-                          false)) {
+          loadBookAtIndex(static_cast<size_t>(refreshedBookIndex), nowMs,
+                          reloadOptions)) {
         reader_.seekTo(resumeIndex);
       }
     }
@@ -5406,8 +5428,12 @@ void App::exitUsbTransfer(uint32_t nowMs) {
     const int refreshedBookIndex = findBookIndexByPath(currentBookPath_);
     if (refreshedBookIndex >= 0) {
       const size_t resumeIndex = reader_.currentIndex();
-      if (loadBookAtIndex(static_cast<size_t>(refreshedBookIndex), nowMs, false, false, false,
-                          false)) {
+      BookOpenOptions reloadOptions;
+      reloadOptions.allowIndexBuild = false;
+      reloadOptions.allowEpubConversion = false;
+      reloadOptions.rebuildTimeEstimate = false;
+      if (loadBookAtIndex(static_cast<size_t>(refreshedBookIndex), nowMs,
+                          reloadOptions)) {
         reader_.seekTo(resumeIndex);
       } else {
         Serial.println("[app] current indexed book unavailable after USB transfer");
@@ -5582,23 +5608,14 @@ void App::enterPowerOff(uint32_t nowMs) {
   menuScreen_ = MenuScreen::Main;
   state_ = AppState::Sleeping;
 
-  const int wakePin = BoardConfig::PIN_DEEP_SLEEP_WAKE;
-  const bool pmuPowerOffOwnsWake =
-      BoardConfig::REQUEST_PMU_SHUTDOWN_ON_POWEROFF &&
-      BoardConfig::POWER_MANAGER == BoardConfig::PowerManagerKind::Axp2101;
-#if defined(RSVP_BOARD_WAVESHARE_ESP32S3_TOUCH_AMOLED_18) || \
-    defined(RSVP_BOARD_WAVESHARE_ESP32S3_TOUCH_AMOLED_216)
-  const bool useRecoverableSoftOff = BoardConfig::SOFTWARE_POWEROFF_USES_SOFT_LOOP;
-  const bool allowSoftOffPowerWake = BoardConfig::SOFT_OFF_WAKE_USES_POWER_BUTTON;
-  const bool allowSoftOffBootWake = BoardConfig::SOFT_OFF_WAKE_USES_BOOT_BUTTON;
-#else
-  const bool useRecoverableSoftOff = false;
-  const bool allowSoftOffPowerWake = false;
-  const bool allowSoftOffBootWake = false;
-#endif
-  const bool externalPowerPresent = pmuPowerOffOwnsWake && BoardConfig::externalPowerPresent();
+  const int wakePin = Board::Config::PIN_DEEP_SLEEP_WAKE;
+  const bool pmuPowerOffOwnsWake = Board::Power::powerOffUsesControllerWake();
+  const bool useRecoverableSoftOff = Board::Config::SOFTWARE_POWEROFF_USES_SOFT_LOOP;
+  const bool allowSoftOffPowerWake = Board::Config::SOFT_OFF_WAKE_USES_POWER_BUTTON;
+  const bool allowSoftOffBootWake = Board::Config::SOFT_OFF_WAKE_USES_BOOT_BUTTON;
+  const bool externalPowerPresent = pmuPowerOffOwnsWake && Board::Power::externalPowerPresent();
   const bool pmuWakeUsesPowerButton = pmuPowerOffOwnsWake || useRecoverableSoftOff;
-  const bool appPowerUsesBootButton = BoardConfig::SWAP_APP_BOOT_AND_POWER_BUTTONS;
+  const bool appPowerUsesBootButton = Board::Config::SWAP_APP_BOOT_AND_POWER_BUTTONS;
   const char *wakeLabel = useRecoverableSoftOff && allowSoftOffPowerWake && allowSoftOffBootWake
                               ? "Press PWR/BOOT to wake"
                           : useRecoverableSoftOff && allowSoftOffPowerWake
@@ -5607,16 +5624,16 @@ void App::enterPowerOff(uint32_t nowMs) {
                               ? "Press BOOT to wake"
                           : pmuWakeUsesPowerButton
                               ? (externalPowerPresent ? "Press PWR to wake" : "Press PWR to start")
-                          : wakePin >= 0 && wakePin == BoardConfig::PIN_BOOT_BUTTON
+                          : wakePin >= 0 && wakePin == Board::Config::PIN_BOOT_BUTTON
                               ? "Press BOOT to start"
-                          : wakePin >= 0 && wakePin == BoardConfig::PIN_PWR_BUTTON
+                          : wakePin >= 0 && wakePin == Board::Config::PIN_PWR_BUTTON
                               ? "Hold PWR to start"
                               : "Press wake to start";
   display_.renderStatus("OFF", appPowerUsesBootButton ? "Release BOOT" : "Release PWR",
                         wakeLabel);
   delay(300);
 
-  if (pmuPowerOffOwnsWake || BoardConfig::APP_POWER_BUTTON_USES_PMU_EVENTS) {
+  if (pmuPowerOffOwnsWake || Board::Buttons::usesPowerEvents()) {
     const uint32_t waitStartMs = millis();
     const uint32_t releaseWaitMs =
         useRecoverableSoftOff ? kSoftOffReleaseWaitMs : kPowerOffReleaseWaitMs;
@@ -5630,18 +5647,18 @@ void App::enterPowerOff(uint32_t nowMs) {
 
   activeBookStore_.close();
   storage_.end();
-  touch_.end();
+  Input::Touch::end();
   touchInitialized_ = false;
   if (!useRecoverableSoftOff) {
     Serial.flush();
   }
 
-  BoardConfig::holdBacklightOffForDeepSleep();
+  Board::System::holdBacklightOffForDeepSleep();
   const bool requestPmuShutdown =
-      BoardConfig::REQUEST_PMU_SHUTDOWN_ON_POWEROFF && !externalPowerPresent &&
+      Board::Power::shouldRequestShutdownOnPowerOff() && !externalPowerPresent &&
       !useRecoverableSoftOff;
-  if (requestPmuShutdown || BoardConfig::RELEASE_BATTERY_HOLD_BEFORE_DEEP_SLEEP) {
-    BoardConfig::releaseBatteryPowerHold();
+  if (requestPmuShutdown || Board::Power::shouldReleaseBatteryPowerBeforeDeepSleep()) {
+    Board::Power::releaseBatteryPowerHold();
   } else if (useRecoverableSoftOff) {
     Serial.println("[app] recoverable soft-off; PMU shutdown skipped");
   } else if (pmuPowerOffOwnsWake && externalPowerPresent) {
@@ -5669,14 +5686,14 @@ void App::enterPowerOff(uint32_t nowMs) {
     return;
   }
 
-  if (BoardConfig::REQUEST_PMU_SHUTDOWN_ON_POWEROFF) {
+  if (Board::Power::shouldRequestShutdownOnPowerOff()) {
     delay(60);
   }
 
-  const bool wakeUsesPowerButton = wakePin >= 0 && wakePin == BoardConfig::PIN_PWR_BUTTON;
+  const bool wakeUsesPowerButton = wakePin >= 0 && wakePin == Board::Config::PIN_PWR_BUTTON;
   const bool wakeUsesSwappedBootButton =
-      BoardConfig::SWAP_APP_BOOT_AND_POWER_BUTTONS &&
-      wakePin >= 0 && wakePin == BoardConfig::PIN_BOOT_BUTTON;
+      Board::Config::SWAP_APP_BOOT_AND_POWER_BUTTONS &&
+      wakePin >= 0 && wakePin == Board::Config::PIN_BOOT_BUTTON;
   if (wakeUsesPowerButton || wakeUsesSwappedBootButton) {
     const uint32_t waitStartMs = millis();
     while (readActiveLowButton(wakePin) && millis() - waitStartMs < kPowerOffReleaseWaitMs) {
@@ -5684,11 +5701,7 @@ void App::enterPowerOff(uint32_t nowMs) {
     }
   }
 
-  if (wakePin >= 0) {
-    pinMode(wakePin, INPUT_PULLUP);
-    esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(wakePin), 0);
-  }
-  esp_deep_sleep_start();
+  Board::System::deepSleepUntilConfiguredWake();
 }
 
 void App::enterSleep(uint32_t nowMs) {
@@ -5701,10 +5714,10 @@ void App::enterSleep(uint32_t nowMs) {
   display_.prepareForSleep();
   activeBookStore_.close();
   storage_.end();
-  touch_.end();
+  Input::Touch::end();
   touchInitialized_ = false;
 
-  BoardConfig::lightSleepUntilBootButton();
+  Board::System::lightSleepUntilBootButton();
   wakeFromSleep();
 }
 
@@ -5712,28 +5725,28 @@ void App::wakeFromSleep(bool fullPeripheralReset) {
   const uint32_t nowMs = millis();
   Serial.println(fullPeripheralReset ? "[app] woke from soft-off" : "[app] woke from light sleep");
 
-  BoardConfig::begin();
+  Board::System::begin();
   if (fullPeripheralReset) {
-    BoardConfig::resetWakePeripherals();
+    Board::System::resetWakePeripherals();
   }
   button_.beginWithState(readLogicalBootButtonHeld());
   powerButton_.beginWithState(readFirmwarePowerButtonHeld());
-  if (BoardConfig::FIRMWARE_POWER_BUTTON_ENABLED &&
-      (BoardConfig::PIN_PWR_BUTTON < 0 || BoardConfig::SWAP_APP_BOOT_AND_POWER_BUTTONS)) {
-    BoardConfig::consumeVirtualPowerButtonShortPressEvent();
-    BoardConfig::consumeVirtualPowerButtonLongPressEvent();
+  if (Board::Config::FIRMWARE_POWER_BUTTON_ENABLED &&
+      (Board::Config::PIN_PWR_BUTTON < 0 || Board::Config::SWAP_APP_BOOT_AND_POWER_BUTTONS)) {
+    Board::Buttons::consumeVirtualPowerShortPress();
+    Board::Buttons::consumeVirtualPowerLongPress();
   }
   keyButton_.begin();
   bootButtonReleasedSinceBoot_ = !button_.isHeld();
   bootButtonLongPressHandled_ = false;
   clearBootButtonTapSequence();
   powerButtonReleasedSinceBoot_ =
-      !BoardConfig::FIRMWARE_POWER_BUTTON_ENABLED
+      !Board::Config::FIRMWARE_POWER_BUTTON_ENABLED
           ? true
           : (logicalPowerButtonUsesVirtualState() ? false : !powerButton_.isHeld());
   powerButtonLongPressHandled_ = false;
-  powerButtonEventArmMs_ = BoardConfig::APP_POWER_BUTTON_USES_PMU_EVENTS
-                               ? millis() + BoardConfig::PMU_BOOT_BUTTON_IGNORE_MS
+  powerButtonEventArmMs_ = Board::Buttons::usesPowerEvents()
+                               ? millis() + Board::Buttons::powerEventIgnoreMs()
                                : 0;
   keyButtonReleasedSinceBoot_ = !keyButton_.isHeld();
   keyButtonLongPressHandled_ = false;
@@ -5749,15 +5762,19 @@ void App::wakeFromSleep(bool fullPeripheralReset) {
   state_ = AppState::Paused;
 
   const bool displayReady = fullPeripheralReset ? display_.begin() : display_.wakeFromSleep();
-  touchInitialized_ = touch_.begin();
+  touchInitialized_ = Input::Touch::begin();
   storageReady_ = storage_.begin();
 
   if (storageReady_ && usingStorageBook_ && !currentBookPath_.isEmpty()) {
     const size_t resumeIndex = reader_.currentIndex();
     const int refreshedBookIndex = findBookIndexByPath(currentBookPath_);
+    BookOpenOptions reloadOptions;
+    reloadOptions.allowIndexBuild = false;
+    reloadOptions.allowEpubConversion = false;
+    reloadOptions.rebuildTimeEstimate = false;
     if (refreshedBookIndex >= 0 &&
-        loadBookAtIndex(static_cast<size_t>(refreshedBookIndex), nowMs, false, false, false,
-                        false)) {
+        loadBookAtIndex(static_cast<size_t>(refreshedBookIndex), nowMs,
+                        reloadOptions)) {
       reader_.seekTo(resumeIndex);
     } else {
       Serial.println("[app] current indexed book unavailable after wake");
@@ -5786,7 +5803,12 @@ bool App::restoreSavedBook(uint32_t nowMs) {
     return false;
   }
 
-  if (!loadBookAtIndex(static_cast<size_t>(bookIndex), nowMs, true, false, false, false)) {
+  BookOpenOptions loadOptions;
+  loadOptions.allowLegacyPositionFallback = true;
+  loadOptions.allowIndexBuild = false;
+  loadOptions.allowEpubConversion = false;
+  loadOptions.rebuildTimeEstimate = false;
+  if (!loadBookAtIndex(static_cast<size_t>(bookIndex), nowMs, loadOptions)) {
     return false;
   }
 
@@ -5830,10 +5852,13 @@ void App::loadPendingBootBook(uint32_t nowMs) {
   pendingBootBookLoad_ = false;
   display_.renderStatus("Loading book", currentBookTitle_, "Please wait");
   const uint32_t startedMs = millis();
-  const bool allowIndexBuild = pendingBootBookLegacyFallback_;
-  const bool loaded = loadBookAtIndex(pendingBootBookIndex_, nowMs,
-                                      pendingBootBookLegacyFallback_, allowIndexBuild, false,
-                                      false);
+  BookOpenOptions loadOptions;
+  loadOptions.allowLegacyPositionFallback = pendingBootBookLegacyFallback_;
+  loadOptions.allowIndexBuild = pendingBootBookLegacyFallback_;
+  loadOptions.allowEpubConversion = false;
+  loadOptions.rebuildTimeEstimate = false;
+  const bool loaded =
+      loadBookAtIndex(pendingBootBookIndex_, nowMs, loadOptions);
   const uint32_t elapsedMs = millis() - startedMs;
   Serial.printf("[app] deferred book load %s in %lu ms\n", loaded ? "ok" : "failed",
                 static_cast<unsigned long>(elapsedMs));
@@ -5877,32 +5902,51 @@ void App::saveReadingPosition(bool force) {
                 currentBookPath_.c_str());
 }
 
-bool App::loadBookAtIndex(size_t index, uint32_t nowMs, bool allowLegacyPositionFallback,
-                          bool allowIndexBuild, bool allowEpubConversion,
-                          bool rebuildTimeEstimate) {
+bool App::loadBookAtIndex(size_t index, uint32_t nowMs,
+                          const BookOpenOptions &options) {
   BookMetadata book;
   String loadedPath;
   size_t loadedIndex = index;
-  const String initialLabel = storage_.bookDisplayName(index);
-  renderStorageStatus("Opening book", initialLabel.c_str(),
-                      allowIndexBuild ? "Checking index" : "Checking saved index", 5);
-  if (!storage_.loadIndexedBook(index, activeBookStore_, book, &loadedPath, &loadedIndex,
-                                allowIndexBuild, allowEpubConversion)) {
-    return false;
+
+  {
+    // Open or build the indexed backing store before attaching it to reader.
+    const String initialLabel = storage_.bookDisplayName(index);
+    renderStorageStatus(
+        "Opening book", initialLabel.c_str(),
+        options.allowIndexBuild ? "Checking index" : "Checking saved index", 5);
+
+    StorageManager::IndexedBookLoadOptions loadOptions;
+    loadOptions.loadedPath = &loadedPath;
+    loadOptions.loadedIndex = &loadedIndex;
+    loadOptions.allowIndexBuild = options.allowIndexBuild;
+    loadOptions.allowEpubConversion = options.allowEpubConversion;
+    if (!storage_.loadIndexedBook(index, activeBookStore_, book, loadOptions)) {
+      return false;
+    }
   }
 
-  const String loadedTitle = book.title.isEmpty() ? displayNameForPath(loadedPath) : book.title;
-  renderStorageStatus("Opening book", loadedTitle.c_str(), "Loading word cache", 70);
+  const String loadedTitle = [&]() {
+    if (!book.title.isEmpty()) {
+      return book.title;
+    }
+    return displayNameForPath(loadedPath);
+  }();
+  const bool keepingExistingTimeCache = !options.rebuildTimeEstimate &&
+                                        timeEstimateCacheValid_ &&
+                                        currentBookPath_ == loadedPath;
 
-  const bool keepingExistingTimeCache =
-      !rebuildTimeEstimate && timeEstimateCacheValid_ && currentBookPath_ == loadedPath;
-  reader_.setWordSource(&activeBookStore_, nowMs);
-  if (reader_.wordCount() == 0 || reader_.currentWord().isEmpty()) {
-    Serial.printf("[app] failed to read first indexed word from %s\n", loadedPath.c_str());
-    activeBookStore_.close();
-    reader_.clearLoadedBook(nowMs);
-    renderStorageStatus("Book open failed", loadedTitle.c_str(), "Word cache unreadable", 100);
-    return false;
+  {
+    // Attach the indexed store and force the first word read while errors are visible.
+    renderStorageStatus("Opening book", loadedTitle.c_str(),
+                        "Loading word cache", 70);
+    reader_.setWordSource(&activeBookStore_, nowMs);
+    if (reader_.wordCount() == 0 || reader_.currentWord().isEmpty()) {
+      Serial.printf("[app] failed to read first indexed word from %s\n", loadedPath.c_str());
+      activeBookStore_.close();
+      reader_.clearLoadedBook(nowMs);
+      renderStorageStatus("Book open failed", loadedTitle.c_str(), "Word cache unreadable", 100);
+      return false;
+    }
   }
 
   chapterMarkers_ = std::move(book.chapters);
@@ -5918,23 +5962,29 @@ bool App::loadBookAtIndex(size_t index, uint32_t nowMs, bool allowLegacyPosition
                        static_cast<uint32_t>(reader_.wordCount()));
   markBookRecent(currentBookPath_);
 
-  const uint32_t savedWordIndex =
-      savedWordIndexForBook(currentBookPath_, allowLegacyPositionFallback);
-  if (savedWordIndex != kNoSavedWordIndex) {
-    renderStorageStatus("Opening book", currentBookTitle_.c_str(), "Restoring position", 78);
-    reader_.seekTo(savedWordIndex);
-    lastSavedWordIndex_ = reader_.currentIndex();
-    Serial.printf("[app] restored book position word=%u key=%s\n",
-                  static_cast<unsigned int>(reader_.currentIndex()),
-                  bookPositionKey(currentBookPath_).c_str());
+  {
+    // Restore saved position after the active book identity has been committed.
+    const uint32_t savedWordIndex = savedWordIndexForBook(
+        currentBookPath_, options.allowLegacyPositionFallback);
+    if (savedWordIndex != kNoSavedWordIndex) {
+      renderStorageStatus("Opening book", currentBookTitle_.c_str(), "Restoring position", 78);
+      reader_.seekTo(savedWordIndex);
+      lastSavedWordIndex_ = reader_.currentIndex();
+      Serial.printf("[app] restored book position word=%u key=%s\n",
+                    static_cast<unsigned int>(reader_.currentIndex()),
+                    bookPositionKey(currentBookPath_).c_str());
+    }
   }
 
-  if (rebuildTimeEstimate) {
-    rebuildTimeEstimateCache();
-  } else if (!keepingExistingTimeCache) {
-    invalidateTimeEstimateCache();
-  } else {
-    renderStorageStatus("Opening book", currentBookTitle_.c_str(), "Using cached estimate", 92);
+  {
+    // Keep, rebuild, or invalidate the time estimate based on how the book was opened.
+    if (options.rebuildTimeEstimate) {
+      rebuildTimeEstimateCache();
+    } else if (!keepingExistingTimeCache) {
+      invalidateTimeEstimateCache();
+    } else {
+      renderStorageStatus("Opening book", currentBookTitle_.c_str(), "Using cached estimate", 92);
+    }
   }
 
   lastProgressSaveMs_ = nowMs;
@@ -6083,14 +6133,14 @@ void App::renderMenu() {
 
 void App::renderMainMenu() {
   std::vector<String> items;
-  items.reserve(BoardConfig::ENABLE_RESTRUCTURED_MENU
+  items.reserve(Board::Config::ENABLE_RESTRUCTURED_MENU
                     ? static_cast<size_t>(RestructuredMenuItemCount)
                     : static_cast<size_t>(MenuItemCount));
   items.push_back(uiText(UiText::Resume));
   items.push_back(uiText(UiText::Chapters));
   items.push_back("Books");
   items.push_back("Articles");
-  if (BoardConfig::ENABLE_RESTRUCTURED_MENU) {
+  if (Board::Config::ENABLE_RESTRUCTURED_MENU) {
     items.push_back(uiText(UiText::Settings));
     items.push_back(uiText(UiText::PowerOff));
     display_.renderMenu(items, menuSelectedIndex_);
@@ -6852,8 +6902,8 @@ bool App::isFocusTimerMenuScreen(MenuScreen screen) const {
   return screen == MenuScreen::FocusTimerGenres || screen == MenuScreen::FocusTimerSession;
 }
 
-void App::applyUiOrientation(BoardConfig::UiOrientation orientation) {
-  touch_.setUiOrientation(orientation);
+void App::applyUiOrientation(Board::Config::UiOrientation orientation) {
+  Input::Touch::setUiOrientation(orientation);
   display_.setUiOrientation(orientation);
 }
 
@@ -6861,9 +6911,9 @@ void App::applyReaderUiOrientation() {
   applyUiOrientation(readerUiOrientation());
 }
 
-BoardConfig::UiOrientation App::readerUiOrientation() const {
-  return uiRotated180() ? BoardConfig::UiOrientation::LandscapeFlipped
-                        : BoardConfig::UiOrientation::Landscape;
+Board::Config::UiOrientation App::readerUiOrientation() const {
+  return uiRotated180() ? Board::Config::UiOrientation::LandscapeFlipped
+                        : Board::Config::UiOrientation::Landscape;
 }
 
 String App::formatFocusTimerRemaining(uint32_t nowMs) const {
@@ -6885,27 +6935,18 @@ String App::focusTimerCountsLabel() const {
 }
 
 void App::playFocusTimerCompletionCue() {
-  if (audio_.beep()) {
+  if (Board::Audio::beep()) {
     return;
   }
 
-  if (!BoardConfig::HAS_LCD_BACKLIGHT || BoardConfig::PIN_LCD_BACKLIGHT < 0) {
-    return;
-  }
-
-  for (int i = 0; i < 3; ++i) {
-    digitalWrite(BoardConfig::PIN_LCD_BACKLIGHT, HIGH);
-    delay(55);
-    digitalWrite(BoardConfig::PIN_LCD_BACKLIGHT, LOW);
-    delay(45);
-  }
+  Board::Display::flashBacklight(3, 55, 45);
 }
 
 bool App::scrollModeEnabled() const { return readerMode_ == ReaderMode::Scroll; }
 
 bool App::uiRotated180() const {
-  return handednessMode_ == HandednessMode::Right ? BoardConfig::UI_ROTATED_180
-                                                  : !BoardConfig::UI_ROTATED_180;
+  return handednessMode_ == HandednessMode::Right ? Board::Config::UI_ROTATED_180
+                                                  : !Board::Config::UI_ROTATED_180;
 }
 
 uint8_t App::effectiveAnchorPercent() const {
@@ -6957,6 +6998,7 @@ String App::collectPhantomBeforeText(size_t currentIndex, size_t charTarget) con
   }
 
   String text;
+  text.reserve(totalChars);
   for (size_t index = startIndex; index < currentIndex; ++index) {
     if (!text.isEmpty()) {
       text += ' ';
@@ -6984,6 +7026,7 @@ String App::collectPhantomAfterText(size_t currentIndex, size_t charTarget) cons
   }
 
   String text;
+  text.reserve(totalChars);
   for (size_t index = currentIndex + 1; index < endIndex; ++index) {
     if (!text.isEmpty()) {
       text += ' ';

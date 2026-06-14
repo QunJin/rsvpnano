@@ -9,20 +9,25 @@
 #include <vector>
 
 #include "app/AppState.h"
-#include "app/Localization.h"
 #include "app/MenuRepeat.h"
-#include "audio/AudioManager.h"
+#include "board/Board.h"
+#include "book/BookMetadata.h"
 #include "display/DisplayManager.h"
-#include "input/ButtonHandler.h"
-#include "input/TouchHandler.h"
+#include "input/InputButtons.h"
+#include "input/InputTouch.h"
 #include "reader/ReadingLoop.h"
 #include "rss/RssFeedManager.h"
 #include "standby/Screensaver.h"
+#include "storage/index/IndexedBookStore.h"
 #include "storage/StorageManager.h"
 #include "sync/CompanionSyncManager.h"
 #include "timer/FocusTimer.h"
+#include "ui/Localization.h"
 #include "update/OtaUpdater.h"
 #include "usb/UsbMassStorageManager.h"
+
+using TouchEvent = Input::Touch::Event;
+using TouchPhase = Input::Touch::Phase;
 
 class App {
  public:
@@ -341,9 +346,20 @@ class App {
   bool prepareBootBookLoad();
   void loadPendingBootBook(uint32_t nowMs);
   void saveReadingPosition(bool force = false);
-  bool loadBookAtIndex(size_t index, uint32_t nowMs, bool allowLegacyPositionFallback = false,
-                       bool allowIndexBuild = true, bool allowEpubConversion = true,
-                       bool rebuildTimeEstimate = true);
+  struct BookOpenOptions {
+    BookOpenOptions()
+        : allowLegacyPositionFallback(false),
+          allowIndexBuild(true),
+          allowEpubConversion(true),
+          rebuildTimeEstimate(true) {}
+
+    bool allowLegacyPositionFallback;
+    bool allowIndexBuild;
+    bool allowEpubConversion;
+    bool rebuildTimeEstimate;
+  };
+  bool loadBookAtIndex(size_t index, uint32_t nowMs,
+                       const BookOpenOptions &options = BookOpenOptions());
   String bookPositionKey(const String &bookPath) const;
   String bookWordCountKey(const String &bookPath) const;
   String bookRecentKey(const String &bookPath) const;
@@ -426,10 +442,10 @@ class App {
   const char *touchPhaseName(TouchPhase phase) const;
   bool isFocusTimerMenuScreen(MenuScreen screen) const;
   bool scrollModeEnabled() const;
-  void applyUiOrientation(BoardConfig::UiOrientation orientation);
+  void applyUiOrientation(Board::Config::UiOrientation orientation);
   void applyReaderUiOrientation();
   void reloadRuntimePreferences(uint32_t nowMs, bool rerender);
-  BoardConfig::UiOrientation readerUiOrientation() const;
+  Board::Config::UiOrientation readerUiOrientation() const;
   bool uiRotated180() const;
   uint8_t effectiveAnchorPercent() const;
   DisplayManager::TypographyConfig effectiveTypographyConfig() const;
@@ -443,13 +459,11 @@ class App {
   AppState standbyReturnState_ = AppState::Paused;
   AppState powerOffConfirmReturnState_ = AppState::Paused;
   DisplayManager display_;
-  AudioManager audio_;
   FocusTimer focusTimer_;
   ReadingLoop reader_;
-  ButtonHandler button_;
-  ButtonHandler powerButton_;
-  ButtonHandler keyButton_;
-  TouchHandler touch_;
+  Input::Buttons::Button button_;
+  Input::Buttons::Button powerButton_;
+  Input::Buttons::Button keyButton_;
   StorageManager storage_;
   IndexedBookStore activeBookStore_;
   OtaUpdater otaUpdater_;
@@ -461,11 +475,11 @@ class App {
   TouchIntent pausedTouchIntent_ = TouchIntent::None;
 
   uint32_t bootStartedMs_ = 0;
+  uint32_t lastActivityMs_ = 0;
   uint32_t lastStateLogMs_ = 0;
   uint32_t powerButtonEventArmMs_ = 0;
   uint32_t wpmFeedbackUntilMs_ = 0;
   uint32_t brightnessToastUntilMs_ = 0;
-  uint32_t lastActivityMs_ = 0;
   uint32_t lastProgressSaveMs_ = 0;
   uint32_t lastBatterySampleMs_ = 0;
   uint32_t batteryRuntimeAnchorMs_ = 0;
@@ -499,10 +513,10 @@ class App {
   size_t quickSettingsSelectedIndex_ = 0;
   size_t quickSyncSelectedIndex_ = 0;
   size_t focusTimerGenreSelectedIndex_ = 0;
+  uint8_t standbyTimerIndex_ = 0;
   uint8_t bootButtonTapCount_ = 0;
   uint8_t brightnessLevelIndex_ = 4;
   uint8_t readerFontSizeIndex_ = 0;
-  uint8_t standbyTimerIndex_ = 0;
   uint16_t menuRepeatDelayMs_ = MenuRepeat::kDefaultDelayMs;
   uint16_t pacingLongWordDelayMs_ = 200;
   uint16_t pacingComplexWordDelayMs_ = 200;
