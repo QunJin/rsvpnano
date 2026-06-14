@@ -215,23 +215,25 @@ constexpr size_t kSettingsHomeRestructuredSdCardIndex = 7;
 constexpr size_t kSettingsDisplayThemeIndex = 1;
 constexpr size_t kSettingsDisplayBrightnessIndex = 2;
 constexpr size_t kSettingsDisplayHandednessIndex = 3;
-constexpr size_t kSettingsDisplayFooterIndex = 4;
-constexpr size_t kSettingsDisplayBatteryIndex = 5;
-constexpr size_t kSettingsDisplayScreensaverIndex = 6;
-constexpr size_t kSettingsDisplayReaderBatteryIndex = 7;
-constexpr size_t kSettingsDisplayReaderChapterIndex = 8;
-constexpr size_t kSettingsDisplayReaderProgressIndex = 9;
-constexpr size_t kSettingsDisplayLanguageIndex = 10;
+constexpr size_t kSettingsDisplayChapterLabelIndex = 4;
+constexpr size_t kSettingsDisplayFooterIndex = 5;
+constexpr size_t kSettingsDisplayBatteryIndex = 6;
+constexpr size_t kSettingsDisplayScreensaverIndex = 7;
+constexpr size_t kSettingsDisplayReaderBatteryIndex = 8;
+constexpr size_t kSettingsDisplayReaderChapterIndex = 9;
+constexpr size_t kSettingsDisplayReaderProgressIndex = 10;
+constexpr size_t kSettingsDisplayLanguageIndex = 11;
 constexpr size_t kSettingsDisplayRestructuredThemeIndex = 1;
 constexpr size_t kSettingsDisplayRestructuredBrightnessIndex = 2;
 constexpr size_t kSettingsDisplayRestructuredHandednessIndex = 3;
 constexpr size_t kSettingsDisplayRestructuredLanguageIndex = 4;
 constexpr size_t kSettingsDisplayRestructuredScreensaverIndex = 5;
-constexpr size_t kSettingsDisplayRestructuredFooterIndex = 6;
-constexpr size_t kSettingsDisplayRestructuredBatteryIndex = 7;
-constexpr size_t kSettingsDisplayRestructuredReaderBatteryIndex = 8;
-constexpr size_t kSettingsDisplayRestructuredReaderChapterIndex = 9;
-constexpr size_t kSettingsDisplayRestructuredReaderProgressIndex = 10;
+constexpr size_t kSettingsDisplayRestructuredChapterLabelIndex = 6;
+constexpr size_t kSettingsDisplayRestructuredFooterIndex = 7;
+constexpr size_t kSettingsDisplayRestructuredBatteryIndex = 8;
+constexpr size_t kSettingsDisplayRestructuredReaderBatteryIndex = 9;
+constexpr size_t kSettingsDisplayRestructuredReaderChapterIndex = 10;
+constexpr size_t kSettingsDisplayRestructuredReaderProgressIndex = 11;
 constexpr size_t kSettingsPacingReadingModeIndex = 1;
 constexpr size_t kSettingsPacingPauseModeIndex = 2;
 constexpr size_t kSettingsPacingWpmIndex = 3;
@@ -279,6 +281,8 @@ constexpr const char *kPrefScreensaverMode = "scrn_sv";
 constexpr const char *kPrefReaderBatteryVisible = "read_bat";
 constexpr const char *kPrefReaderChapterVisible = "read_ch";
 constexpr const char *kPrefReaderProgressVisible = "read_pct";
+constexpr const char *kPrefChapterLabelRsvp = "ch_lbl_rsvp";
+constexpr const char *kPrefChapterLabelScroll = "ch_lbl_scroll";
 constexpr const char *kPrefReaderFontSize = "font_size";
 constexpr const char *kPrefReaderTypeface = "typeface";
 constexpr const char *kPrefTypographyFocusHighlight = "type_hlt";
@@ -847,6 +851,8 @@ void App::begin() {
           kPrefUiLanguage, static_cast<uint8_t>(uiLanguage_)));
   readerMode_ = readerModeFromSetting(
       preferences_.getUChar(kPrefReaderMode, static_cast<uint8_t>(readerMode_)));
+  chapterLabelEnabled_ =
+      preferences_.getBool(chapterLabelPrefKey(), chapterLabelDefaultForMode(readerMode_));
   handednessMode_ = handednessModeFromSetting(
       preferences_.getUChar(kPrefHandedness, static_cast<uint8_t>(handednessMode_)));
   readerFontSizeIndex_ = preferences_.getUChar(kPrefReaderFontSize, readerFontSizeIndex_);
@@ -1782,6 +1788,8 @@ void App::reloadRuntimePreferences(uint32_t nowMs, bool rerender) {
           kPrefUiLanguage, static_cast<uint8_t>(uiLanguage_)));
   readerMode_ = readerModeFromSetting(
       preferences_.getUChar(kPrefReaderMode, static_cast<uint8_t>(readerMode_)));
+  chapterLabelEnabled_ =
+      preferences_.getBool(chapterLabelPrefKey(), chapterLabelDefaultForMode(readerMode_));
   handednessMode_ = handednessModeFromSetting(
       preferences_.getUChar(kPrefHandedness, static_cast<uint8_t>(handednessMode_)));
   readerFontSizeIndex_ = preferences_.getUChar(kPrefReaderFontSize, readerFontSizeIndex_);
@@ -1967,6 +1975,8 @@ void App::cycleUiLanguage(uint32_t nowMs) {
 void App::cycleReaderMode(uint32_t nowMs) {
   readerMode_ = nextReaderMode(readerMode_);
   preferences_.putUChar(kPrefReaderMode, static_cast<uint8_t>(readerMode_));
+  chapterLabelEnabled_ =
+      preferences_.getBool(chapterLabelPrefKey(), chapterLabelDefaultForMode(readerMode_));
   Serial.printf("[display] reader mode=%s\n", readerModeLabel().c_str());
   invalidateContextPreviewWindow();
 
@@ -2200,7 +2210,7 @@ DisplayManager::ReaderChrome App::readerChrome() const {
   DisplayManager::ReaderChrome chrome;
   const bool reading = isActivelyReading();
   chrome.showBattery = !reading || readerBatteryVisibleWhilePlaying_;
-  chrome.showChapter = !reading || readerChapterVisibleWhilePlaying_;
+  chrome.showChapter = chapterLabelEnabled_ && (!reading || readerChapterVisibleWhilePlaying_);
   chrome.showProgress = !reading || readerProgressVisibleWhilePlaying_;
   chrome.showPreviousSentenceHint = !contextViewVisible_ || scrollModeEnabled();
   return chrome;
@@ -3442,6 +3452,12 @@ void App::selectSettingsItem(uint32_t nowMs) {
       case kSettingsDisplayHandednessIndex:
         cycleHandednessMode(nowMs);
         return;
+      case kSettingsDisplayChapterLabelIndex:
+        chapterLabelEnabled_ = !chapterLabelEnabled_;
+        preferences_.putBool(chapterLabelPrefKey(), chapterLabelEnabled_);
+        rebuildSettingsMenuItems();
+        renderSettings();
+        return;
       case kSettingsDisplayFooterIndex:
         switch (footerMetricMode_) {
           case FooterMetricMode::Percentage:
@@ -3666,6 +3682,12 @@ void App::selectRestructuredSettingsItem(uint32_t nowMs) {
             break;
         }
         preferences_.putUChar(kPrefScreensaverMode, static_cast<uint8_t>(screensaverMode_));
+        rebuildSettingsMenuItems();
+        renderSettings();
+        return;
+      case kSettingsDisplayRestructuredChapterLabelIndex:
+        chapterLabelEnabled_ = !chapterLabelEnabled_;
+        preferences_.putBool(chapterLabelPrefKey(), chapterLabelEnabled_);
         rebuildSettingsMenuItems();
         renderSettings();
         return;
@@ -4381,6 +4403,7 @@ void App::rebuildSettingsMenuItems() {
       settingsMenuItems_.push_back("L/R hand: " + handednessLabel());
       settingsMenuItems_.push_back(uiText(UiText::Language) + ": " + uiLanguageLabel());
       settingsMenuItems_.push_back("Screen saver: " + screensaverModeLabel());
+      settingsMenuItems_.push_back("Chapter label: " + onOffLabel(chapterLabelEnabled_));
       settingsMenuItems_.push_back("Progress label: " + footerMetricModeLabel());
       settingsMenuItems_.push_back("Battery label: " + batteryLabelModeLabel());
       settingsMenuItems_.push_back("Reading battery: " +
@@ -4433,6 +4456,7 @@ void App::rebuildSettingsMenuItems() {
     settingsMenuItems_.push_back(uiText(UiText::Brightness) + ": " +
                                  String(currentBrightnessPercent()) + "%");
     settingsMenuItems_.push_back("Reader hand: " + handednessLabel());
+    settingsMenuItems_.push_back("Chapter label: " + onOffLabel(chapterLabelEnabled_));
     settingsMenuItems_.push_back("Footer label: " + footerMetricModeLabel());
     settingsMenuItems_.push_back("Battery label: " + batteryLabelModeLabel());
     settingsMenuItems_.push_back("Screensaver: " + screensaverModeLabel());
@@ -6598,12 +6622,38 @@ size_t App::currentChapterIndex() const {
 
 String App::currentChapterLabel() const {
   const size_t chapterIndex = currentChapterIndex();
+  const String fallback = currentBookTitle_.isEmpty() ? uiText(UiText::Start) : currentBookTitle_;
   if (chapterIndex >= chapterMarkers_.size()) {
-    return currentBookTitle_.isEmpty() ? uiText(UiText::Start) : currentBookTitle_;
+    return fallback;
   }
 
-  return chapterMarkers_[chapterIndex].title;
+  return cleanedChapterTitle(chapterMarkers_[chapterIndex].title, fallback);
 }
+
+String App::cleanedChapterTitle(const String &raw, const String &fallback) const {
+  if (raw.isEmpty()) {
+    return fallback;
+  }
+
+  size_t index = 0;
+  while (index < static_cast<size_t>(raw.length()) && isDigit(raw[index])) {
+    ++index;
+  }
+
+  if (index > 0 && index < static_cast<size_t>(raw.length()) && raw[index] == '.') {
+    String cleaned = raw.substring(index + 1);
+    cleaned.trim();
+    return cleaned.isEmpty() ? fallback : cleaned;
+  }
+
+  return raw;
+}
+
+const char *App::chapterLabelPrefKey() const {
+  return readerMode_ == ReaderMode::Scroll ? kPrefChapterLabelScroll : kPrefChapterLabelRsvp;
+}
+
+bool App::chapterLabelDefaultForMode(ReaderMode mode) { return mode != ReaderMode::Scroll; }
 
 String App::currentFooterMetricLabel() const {
   if (footerMetricMode_ == FooterMetricMode::Percentage) {

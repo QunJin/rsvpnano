@@ -374,6 +374,9 @@ class App {
   String chapterMenuLabel(size_t chapterIndex) const;
   size_t currentChapterIndex() const;
   String currentChapterLabel() const;
+  String cleanedChapterTitle(const String &raw, const String &fallback) const;
+  const char *chapterLabelPrefKey() const;
+  static bool chapterLabelDefaultForMode(ReaderMode mode);
   String currentFooterMetricLabel() const;
   String currentBatteryLabel() const;
   String footerMetricModeLabel() const;
@@ -582,6 +585,7 @@ class App {
   bool readerBatteryVisibleWhilePlaying_ = true;
   bool readerChapterVisibleWhilePlaying_ = false;
   bool readerProgressVisibleWhilePlaying_ = false;
+  bool chapterLabelEnabled_ = true;
   FooterMetricMode footerMetricMode_ = FooterMetricMode::Percentage;
   BatteryLabelMode batteryLabelMode_ = BatteryLabelMode::Percent;
   ScreensaverMode screensaverMode_ = ScreensaverMode::Life;
