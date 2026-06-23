@@ -4,6 +4,7 @@
 
 #include "text/AsciiText.h"
 #include "text/LatinText.h"
+#include "text/VietnameseText.h"
 
 namespace RsvpText {
 
@@ -97,6 +98,13 @@ void appendDisplayApproximation(String &target, uint32_t codepoint) {
   uint8_t storedByte = 0;
   if (LatinText::storageByteForCodepoint(codepoint, storedByte)) {
     target += static_cast<char>(storedByte);
+    return;
+  }
+
+  uint8_t vietSlot = 0;
+  if (LatinText::isVietnameseMode() &&
+      VietnameseText::customSlotForCodepoint(codepoint, vietSlot)) {
+    target += static_cast<char>(vietSlot);
     return;
   }
 

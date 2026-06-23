@@ -11,6 +11,7 @@ class DisplayManager {
     Standard = 0,
     OpenDyslexic = 1,
     AtkinsonHyperlegible = 2,
+    Vietnamese = 3,
   };
 
   struct TypographyConfig {

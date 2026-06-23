@@ -27,6 +27,14 @@ inline bool isLowCustomSlotByte(uint8_t value) {
     case 0x15:
     case 0x16:
     case 0x17:
+    case 0x18:
+    case 0x19:
+    case 0x1A:
+    case 0x1B:
+    case 0x1C:
+    case 0x1D:
+    case 0x1E:
+    case 0x1F:
       return true;
     default:
       return false;
@@ -548,7 +556,10 @@ inline bool isLetter(uint8_t value) {
   return isUppercaseLetter(value) || isLowercaseLetter(value);
 }
 
-inline bool isWordCharacter(uint8_t value) { return isLetter(value) || isDigit(value); }
+inline bool isWordCharacter(uint8_t value) {
+  if (value >= 0x18 && value <= 0x1F) return true;  // Vietnamese Ắ-ẵ slots
+  return isLetter(value) || isDigit(value);
+}
 
 inline uint8_t toLowercaseByte(uint8_t value) {
   if (value >= 'A' && value <= 'Z') {
@@ -630,6 +641,13 @@ inline bool hasExtendedBytes(const String &text) {
   }
   return false;
 }
+
+inline bool& vietnameseMode() {
+  static bool s_mode = false;
+  return s_mode;
+}
+inline void setVietnameseMode(bool mode) { vietnameseMode() = mode; }
+inline bool isVietnameseMode() { return vietnameseMode(); }
 
 inline uint8_t fallbackAsciiByte(uint8_t value) {
   if (value >= 32 && value <= 126) {

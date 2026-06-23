@@ -14,6 +14,7 @@
 #include "display/EmbeddedOpenDyslexicFont70.h"
 #include "display/EmbeddedSerifFont.h"
 #include "display/EmbeddedSerifFont70.h"
+#include "display/EmbeddedVietnameseSerifFont.h"
 #include "text/LatinText.h"
 
 namespace {
@@ -241,10 +242,24 @@ DisplayManager::ReaderTypeface currentReaderTypeface() {
 }
 
 DisplayManager::ReaderTypeface effectiveReaderTypefaceForText(const String &) {
+  if (LatinText::isVietnameseMode()) {
+    return DisplayManager::ReaderTypeface::Vietnamese;
+  }
   return currentReaderTypeface();
 }
 
+ReaderGlyph vietnameseSerifGlyphForSlot(uint8_t value) {
+  if (value < kEmbeddedVietnameseSerifFirstChar || value > kEmbeddedVietnameseSerifLastChar) {
+    value = static_cast<uint8_t>('?');
+  }
+  const EmbeddedVietnameseSerifGlyph &glyph =
+      kEmbeddedVietnameseSerifGlyphs[value - kEmbeddedVietnameseSerifFirstChar];
+  return {kEmbeddedVietnameseSerifBitmaps + glyph.bitmapOffset, glyph.xOffset, glyph.width,
+          glyph.xAdvance, kEmbeddedVietnameseSerifHeight};
+}
+
 bool invertedPunctuationBaseByte(uint8_t value, uint8_t &base) {
+  if (LatinText::isVietnameseMode()) return false;
   switch (value) {
     case 0x16:
       base = static_cast<uint8_t>('!');
@@ -276,6 +291,8 @@ int baseGlyphHeightForTypeface(DisplayManager::ReaderTypeface typeface) {
       return kEmbeddedOpenDyslexicHeight;
     case DisplayManager::ReaderTypeface::AtkinsonHyperlegible:
       return kEmbeddedAtkinsonHeight;
+    case DisplayManager::ReaderTypeface::Vietnamese:
+      return kEmbeddedVietnameseSerifHeight;
     case DisplayManager::ReaderTypeface::Standard:
     default:
       return kEmbeddedSerifHeight;
@@ -292,6 +309,8 @@ int mediumGlyphHeightForTypeface(DisplayManager::ReaderTypeface typeface) {
       return kEmbeddedOpenDyslexic70Height;
     case DisplayManager::ReaderTypeface::AtkinsonHyperlegible:
       return kEmbeddedAtkinson70Height;
+    case DisplayManager::ReaderTypeface::Vietnamese:
+      return kEmbeddedVietnameseSerifHeight;
     case DisplayManager::ReaderTypeface::Standard:
     default:
       return kEmbeddedSerif70Height;
@@ -413,6 +432,8 @@ ReaderGlyph glyphFor(char c, DisplayManager::ReaderTypeface typeface) {
       return {kEmbeddedAtkinsonBitmaps + glyph.bitmapOffset, glyph.xOffset, glyph.width,
               glyph.xAdvance, kEmbeddedAtkinsonHeight};
     }
+    case DisplayManager::ReaderTypeface::Vietnamese:
+      return vietnameseSerifGlyphForSlot(lookupValue);
     case DisplayManager::ReaderTypeface::Standard:
     default:
       return serifGlyphForByte(lookupValue);
@@ -449,6 +470,8 @@ ReaderGlyph glyph70For(char c, DisplayManager::ReaderTypeface typeface) {
       return {kEmbeddedAtkinson70Bitmaps + glyph.bitmapOffset, glyph.xOffset, glyph.width,
               glyph.xAdvance, kEmbeddedAtkinson70Height};
     }
+    case DisplayManager::ReaderTypeface::Vietnamese:
+      return vietnameseSerifGlyphForSlot(lookupValue);
     case DisplayManager::ReaderTypeface::Standard:
     default:
       return serif70GlyphForByte(lookupValue);
@@ -760,6 +783,7 @@ int orpOrdinalForLength(int length) {
 }
 
 int findFocusLetterIndex(const String &word) {
+  if (LatinText::isVietnameseMode()) return -1;
   int wordCharacterCount = 0;
   for (size_t i = 0; i < word.length(); ++i) {
     if (isWordCharacter(word[i])) {
