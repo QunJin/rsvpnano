@@ -102,8 +102,8 @@ void appendDisplayApproximation(String &target, uint32_t codepoint) {
   }
 
   uint8_t vietSlot = 0;
-  if (LatinText::isVietnameseMode() &&
-      VietnameseText::customSlotForCodepoint(codepoint, vietSlot)) {
+  if (VietnameseText::customSlotForCodepoint(codepoint, vietSlot)) {
+    LatinText::setVietnameseMode(true);
     target += static_cast<char>(vietSlot);
     return;
   }
