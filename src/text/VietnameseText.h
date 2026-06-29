@@ -119,6 +119,8 @@ inline bool customSlotForCodepoint(uint32_t codepoint, uint8_t &slot) {
     case 0x1EF9: slot = 0xCF; return true;  // ỹ (repurposed from Ï)
     case 0x1EF0: slot = 0xD7; return true;  // Ự
     case 0x1EF1: slot = 0xF7; return true;  // ự
+    case 0x0168: slot = 0xC8; return true;  // Ũ
+    case 0x0169: slot = 0xC9; return true;  // ũ
     default:
       return false;
   }
@@ -176,6 +178,7 @@ inline bool customLowercaseByte(uint8_t value, uint8_t &lowercase) {
     case 0xC7: lowercase = 0xCB; return true;  // Ỷ -> ỷ
     case 0xCE: lowercase = 0xCF; return true;  // Ỹ -> ỹ
     case 0xD7: lowercase = 0xF7; return true;  // Ự -> ự
+    case 0xC8: lowercase = 0xC9; return true;  // Ũ -> ũ
     default:
       return false;
   }
@@ -195,7 +198,7 @@ inline bool isCustomLowercaseLetter(uint8_t value) {
     case 0x99: case 0x9B: case 0x9D: case 0x9F: case 0xA2: case 0xA4:
     case 0xA6: case 0xA8: case 0xAA: case 0xAC: case 0xAF: case 0xB1:
     case 0xB3: case 0xB5: case 0xB7: case 0xB9: case 0xBB: case 0xBF:
-    case 0xC4: case 0xC6: case 0xCB: case 0xCF: case 0xF7:
+    case 0xC4: case 0xC6: case 0xC9: case 0xCB: case 0xCF: case 0xF7:
       return true;
     default:
       return false;
@@ -230,7 +233,7 @@ inline bool isVowel(uint8_t value) {
     case 0xB6: case 0xB7: case 0xB8: case 0xB9:
     case 0xBA: case 0xBB: case 0xBE: case 0xBF:
     case 0xC3: case 0xC4: case 0xC5: case 0xC6:
-    case 0xC7: case 0xCB: case 0xCE: case 0xCF:
+    case 0xC7: case 0xC8: case 0xC9: case 0xCB: case 0xCE: case 0xCF:
     case 0xD7: case 0xF7:
       return true;
     default:
@@ -272,6 +275,10 @@ inline uint8_t fallbackAsciiByte(uint8_t value) {
     case 0xB2: case 0xB4: case 0xB6: case 0xB8: case 0xBA: case 0xBE:
       return 'U';
     case 0xB3: case 0xB5: case 0xB7: case 0xB9: case 0xBB: case 0xBF:
+      return 'u';
+    case 0xC8:
+      return 'U';
+    case 0xC9:
       return 'u';
     case 0xC3: case 0xC5: case 0xC7: case 0xCE:
       return 'Y';
