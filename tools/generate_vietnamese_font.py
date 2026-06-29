@@ -18,6 +18,7 @@ import os
 import pathlib
 import subprocess
 import tempfile
+from PIL import Image, ImageDraw, ImageFont
 
 DEFAULT_FONT_NAME = "DejaVuSans"
 DEFAULT_FONT_SEARCH_PATHS = [
@@ -135,6 +136,19 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def find_font_file(font_name, font_search_paths):
+    candidates = [f"{font_name}.ttf", f"{font_name}.otf"]
+    for directory in font_search_paths:
+        p = pathlib.Path(directory)
+        if not p.is_dir():
+            continue
+        for candidate in candidates:
+            f = p / candidate
+            if f.exists():
+                return str(f)
+    raise RuntimeError(f"Could not find font file for {font_name}")
+
+
 def escape_postscript_char(ch: str) -> str:
     if ch in ("\\", "(", ")"):
         return "\\" + ch
@@ -179,45 +193,28 @@ def glyph_comment_for_slot(slot: int) -> str:
 def render_glyph(tmp_dir, slot, font_name, point_size, font_search_paths):
     output = tmp_dir / f"{slot:03d}.pgm"
     codepoint = display_codepoint_for_slot(slot)
-    program = (
-        "1 setgray clippath fill "
-        "0 setgray "
-        f"{latin1_font_setup(font_name, point_size)}"
-        f"{ORIGIN_X} {BASELINE_Y} moveto "
-        f"{glyph_script_for_codepoint(codepoint)} showpage"
-    )
-    command = [
-        "gs", "-q", "-dNOPAUSE", "-dBATCH",
-        "-dTextAlphaBits=4", "-dGraphicsAlphaBits=4",
-        "-sDEVICE=pgmraw", "-r72",
-        f"-g{CANVAS_WIDTH}x{CANVAS_HEIGHT}",
-        f"-sOutputFile={output}",
-    ]
-    existing_paths = [p for p in font_search_paths if pathlib.Path(p).is_dir()]
-    if existing_paths:
-        command.append(f"-sFONTPATH={os.pathsep.join(existing_paths)}")
-    command += ["-c", program]
-    subprocess.run(command, check=True, capture_output=True, text=True)
+    char = chr(codepoint)
+    font_path = find_font_file(font_name, font_search_paths)
+    pil_font = ImageFont.truetype(font_path, point_size)
+    img = Image.new("L", (CANVAS_WIDTH, CANVAS_HEIGHT), 255)
+    draw = ImageDraw.Draw(img)
+    baseline_from_top = CANVAS_HEIGHT - BASELINE_Y
+    draw.text((ORIGIN_X, baseline_from_top), char, font=pil_font, fill=0, anchor="ls")
+    # Write as PGM P5
+    pixels = img.tobytes()
+    header = "P5\n" + str(CANVAS_WIDTH) + " " + str(CANVAS_HEIGHT) + "\n255\n"
+    pgm = header.encode() + pixels
+    output.write_bytes(pgm)
     return output
 
 
 def advance_width_for_glyph(slot, font_name, point_size, font_search_paths):
     codepoint = display_codepoint_for_slot(slot)
-    command = ["gs", "-q", "-dNODISPLAY"]
-    existing_paths = [p for p in font_search_paths if pathlib.Path(p).is_dir()]
-    if existing_paths:
-        command.append(f"-sFONTPATH={os.pathsep.join(existing_paths)}")
-    command += ["-c", (
-        f"{latin1_font_setup(font_name, point_size)}"
-        "0 0 moveto "
-        f"{glyph_script_for_codepoint(codepoint)} "
-        "currentpoint pop == quit"
-    )]
-    result = subprocess.run(command, check=True, capture_output=True, text=True)
-    lines = [l.strip() for l in result.stdout.splitlines() if l.strip()]
-    if not lines:
-        raise RuntimeError(f"Failed advance width for slot 0x{slot:02X}")
-    return max(1, int(math.floor(float(lines[-1]) + 0.5)))
+    char = chr(codepoint)
+    font_path = find_font_file(font_name, font_search_paths)
+    pil_font = ImageFont.truetype(font_path, point_size)
+    length = pil_font.getlength(char)
+    return max(1, int(math.floor(length + 0.5)))
 
 
 def parse_pgm(path):
