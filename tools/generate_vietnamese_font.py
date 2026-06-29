@@ -72,53 +72,53 @@ CUSTOM_GLYPH_CODEPOINTS = {
 }
 
 _NAME_PAIRS = [
-    (0x01A0, "Ohorn"), (0x01A1, "ohorn"), (0x01AF, "Uhorn"), (0x01B0, "uhorn"),
-    (0x1EA0, "Adotbelow"), (0x1EA1, "adotbelow"), (0x1EA2, "Ahookabove"), (0x1EA3, "ahookabove"),
-    (0x1EA4, "Acircumflexacute"), (0x1EA5, "acircumflexacute"),
-    (0x1EA6, "Acircumflexgrave"), (0x1EA7, "acircumflexgrave"),
-    (0x1EA8, "Acircumflexhook"), (0x1EA9, "acircumflexhook"),
-    (0x1EAA, "Acircumflextilde"), (0x1EAB, "acircumflextilde"),
-    (0x1EAC, "Acircumflexdotbelow"), (0x1EAD, "acircumflexdotbelow"),
-    (0x1EAE, "Abreveacute"), (0x1EAF, "abreveacute"),
-    (0x1EB0, "Abrevegrave"), (0x1EB1, "abrevegrave"),
-    (0x1EB2, "Abrevehook"), (0x1EB3, "abrevehook"),
-    (0x1EB4, "Abrevetilde"), (0x1EB5, "abrevetilde"),
-    (0x1EB6, "Abrevedotbelow"), (0x1EB7, "abrevedotbelow"),
-    (0x1EB8, "Edotbelow"), (0x1EB9, "edotbelow"),
-    (0x1EBA, "Ehookabove"), (0x1EBB, "ehookabove"),
-    (0x1EBC, "Etilde"), (0x1EBD, "etilde"),
-    (0x1EBE, "Ecircumflexacute"), (0x1EBF, "ecircumflexacute"),
-    (0x1EC0, "Ecircumflexgrave"), (0x1EC1, "ecircumflexgrave"),
-    (0x1EC2, "Ecircumflexhook"),
-    (0x1EC4, "Ecircumflextilde"), (0x1EC5, "ecircumflextilde"),
-    (0x1EC6, "Ecircumflexdotbelow"), (0x1EC7, "ecircumflexdotbelow"),
-    (0x1EC8, "Ihookabove"), (0x1EC9, "ihookabove"),
-    (0x1ECA, "Idotbelow"), (0x1ECB, "idotbelow"),
-    (0x1ECC, "Odotbelow"), (0x1ECD, "odotbelow"),
-    (0x1ECE, "Ohookabove"), (0x1ECF, "ohookabove"),
-    (0x1ED0, "Ocircumflexacute"), (0x1ED1, "ocircumflexacute"),
-    (0x1ED2, "Ocircumflexgrave"), (0x1ED3, "ocircumflexgrave"),
-    (0x1ED4, "Ocircumflexhook"),
-    (0x1ED6, "Ocircumflextilde"), (0x1ED7, "ocircumflextilde"),
-    (0x1ED8, "Ocircumflexdotbelow"), (0x1ED9, "ocircumflexdotbelow"),
-    (0x1EDA, "Ohornacute"), (0x1EDB, "ohornacute"),
-    (0x1EDC, "Ohorngrave"), (0x1EDD, "ohorngrave"),
-    (0x1EDE, "Ohornhook"),
-    (0x1EE0, "Ohorntilde"), (0x1EE1, "ohorntilde"),
-    (0x1EE2, "Ohorndotbelow"), (0x1EE3, "ohorndotbelow"),
-    (0x1EE4, "Udotbelow"), (0x1EE5, "udotbelow"),
-    (0x1EE6, "Uhookabove"), (0x1EE7, "uhookabove"),
-    (0x1EE8, "Uhornacute"), (0x1EE9, "uhornacute"),
-    (0x1EEA, "Uhorngrave"), (0x1EEB, "uhorngrave"),
-    (0x1EEC, "Uhornhook"), (0x1EED, "uhornhook"),
-    (0x1EEE, "Uhorntilde"), (0x1EEF, "uhorntilde"),
-    (0x1EF0, "Uhorndotbelow"), (0x1EF1, "uhorndotbelow"),
-    (0x1EF2, "Ygrave"), (0x1EF3, "ygrave"),
-    (0x1EF4, "Ydotbelow"), (0x1EF5, "ydotbelow"),
-    (0x1EF6, "Yhookabove"), (0x1EF7, "yhookabove"),
-    (0x1EF8, "Ytilde"), (0x1EF9, "ytilde"),
-    (0x0102, "Abreve"), (0x0103, "abreve"),
-    (0x0110, "Dcroat"), (0x0111, "dcroat"),
+    (0x01A0, "Ohorn"), (0x01A1, "ohorn"), (0x01AF, "Uhorn"), (0x01B0, "uhorn")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ]
 CUSTOM_GLYPH_NAMES = dict(_NAME_PAIRS)
 
