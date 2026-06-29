@@ -557,7 +557,7 @@ inline bool isLetter(uint8_t value) {
 }
 
 inline bool isWordCharacter(uint8_t value) {
-  if (value >= 0x18 && value <= 0x1F) return true;  // Vietnamese Ắ-ẵ slots
+  if (isLowCustomSlotByte(value)) return true;  // Vietnamese custom slots 0x01–0x1F
   return isLetter(value) || isDigit(value);
 }
 
