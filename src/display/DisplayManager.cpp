@@ -249,11 +249,13 @@ DisplayManager::ReaderTypeface effectiveReaderTypefaceForText(const String &) {
 }
 
 ReaderGlyph vietnameseSerifGlyphForSlot(uint8_t value) {
+  Serial.printf("[VIET] called slot=0x%02X\n", value);
   if (value < kEmbeddedVietnameseSerifFirstChar || value > kEmbeddedVietnameseSerifLastChar) {
     value = static_cast<uint8_t>('?');
   }
   const EmbeddedVietnameseSerifGlyph &glyph =
       kEmbeddedVietnameseSerifGlyphs[value - kEmbeddedVietnameseSerifFirstChar];
+  Serial.printf("[VIET] result slot=0x%02X w=%d\n", value, glyph.width);
   return {kEmbeddedVietnameseSerifBitmaps + glyph.bitmapOffset, glyph.xOffset, glyph.width,
           glyph.xAdvance, kEmbeddedVietnameseSerifHeight};
 }
